@@ -37,6 +37,8 @@ from services.audio import generate_audio, get_audio_duration
 from services.images import get_image_client
 from services.renderer import render_video
 from services.ai_motion import generate_ai_clips_parallel
+from core.cinematic_state.service import CinematicStateService
+from core.cinematic_state.models import SceneResult, EmotionShift
 import store
 
 
@@ -50,6 +52,10 @@ async def run_hybrid_pipeline(job_id: str, req: HybridVideoRequest) -> None:
       5. Deterministic video composition (FFmpeg)
     """
     try:
+        # ── 0. Cinematic State Initialization ─────────────────────────────────
+        # Ensure cinematic state exists for this story/job
+        CinematicStateService.create_state(job_id)
+
         # ── 1. Script ─────────────────────────────────────────────────────────
         store.update_job(job_id, status="generating_script", progress=5)
         script = await generate_script_for_hybrid(req)
@@ -116,6 +122,20 @@ async def run_hybrid_pipeline(job_id: str, req: HybridVideoRequest) -> None:
             ai_clip_paths=ai_clips,
             subtitle_lines=subtitle_lines,
         )
+
+        # ── 7. Cinematic State Update ─────────────────────────────────────────
+        # Integration Hook: Update the state with the result of the render.
+        # In a real scenario, this data would be derived from the script/render analysis.
+        scene_result = SceneResult(
+            scene_summary=script.get("caption", "No caption provided"),
+            emotion_shift=EmotionShift(
+                dominant_emotion=req.tone,
+                intensity_delta=0.1 # Example shift
+            ),
+            character_updates=[], # Populated if characters are detected
+            new_facts=[f"Video generated for topic: {req.resolved_topic}"]
+        )
+        CinematicStateService.update_state(job_id, scene_result)
 
         store.update_job(
             job_id,

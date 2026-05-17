@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from config import FRONTEND_URL, OUTPUT_DIR
-from routers import videos, payments, credits
+from routers import videos, payments, credits, cinematic_state, scene_intent
 from services.avatar import is_wav2lip_ready
 
 app = FastAPI(
@@ -51,6 +51,8 @@ app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
 app.include_router(videos.router)
 app.include_router(payments.router)
 app.include_router(credits.router)
+app.include_router(cinematic_state.router)
+app.include_router(scene_intent.router)
 
 
 @app.get("/health", tags=["system"])
