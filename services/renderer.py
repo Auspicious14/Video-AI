@@ -1,0 +1,739 @@
+"""
+services/renderer.py  —  Deterministic Composition Engine (Layer A)
+═══════════════════════════════════════════════════════════════════════════════
+
+Root cause of shake / vibration (now eliminated):
+  1. FPS=25 — FFmpeg zoompan's per-frame x/y is recalculated each call with
+     floating-point drift.  Fixed: FPS=30, ALL positions are trunc()-wrapped.
+  2. random.choice() for effects — non-deterministic per run.  Fixed: caller
+     supplies effect_index; effects are chosen by scene position, not RNG.
+  3. zoompan doesn't emit an FPS-locked stream unless fps= is set AND the
+     output -r flag is also set.  Fixed: both are always 30.
+  4. scale= step was 0.002 (too coarse → visible jitter).  Fixed: 0.0006.
+  5. x/y expressions in zoompan must use trunc() to stay on integer pixels.
+     We also multiply by 1.0 to keep FFmpeg's expression engine happy.
+
+Architecture (Layers A / B / C):
+  ┌─ Layer A: Deterministic Composition Engine (this file)
+  │   • FFmpeg zoompan / parallax / transitions
+  │   • PIL subtitle + overlay compositing
+  │   • Fixed 30 fps, fixed aspect ratio 576×1024 (9:16)
+  │
+  ├─ Layer B: AI asset generation (images.py / audio.py)
+  └─ Layer C: AI motion clips (ai_motion.py) — optional enhancement
+"""
+
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Optional, List, Tuple
+from PIL import Image, ImageDraw, ImageFont
+from config import OUTPUT_DIR
+
+# ─── Master constants ─────────────────────────────────────────────────────────
+FPS    = 30          # LOCKED — never change per-call, use this everywhere
+W      = 576         # output width  (9:16 portrait)
+H      = 1024        # output height
+SCALE  = 2           # overscan for zoompan (2× avoids black edges)
+SW     = W * SCALE   # 1152
+SH     = H * SCALE   # 2048
+# Max zoom factor (1.5 = 50% zoom-in).  Keep ≤1.5 for quality.
+MAX_Z  = 1.5
+# Zoom step per frame — tiny value is key to eliminating jitter
+ZOOM_STEP = 0.0006
+
+
+# ─── Motion effect presets (deterministic, no randomness) ────────────────────
+# All expressions use trunc() to snap to integer pixel coords.
+# d = total frames for the clip.  fps= must match FPS constant.
+
+def _zoom_in(duration: float, fps: int = FPS) -> str:
+    """Slow push-in from 1.0× to MAX_Z×."""
+    d = max(1, int(duration * fps))
+    return (
+        f"scale={SW}:{SH},"
+        f"zoompan="
+        f"z='min(1+on*{ZOOM_STEP:.4f},{MAX_Z})':"
+        f"x='trunc(iw/2-(iw/zoom/2))':"
+        f"y='trunc(ih/2-(ih/zoom/2))':"
+        f"d={d}:fps={fps}:s={W}x{H}"
+    )
+
+
+def _zoom_out(duration: float, fps: int = FPS) -> str:
+    """Pull-back from MAX_Z× to 1.0×."""
+    d = max(1, int(duration * fps))
+    return (
+        f"scale={SW}:{SH},"
+        f"zoompan="
+        f"z='if(eq(on,1),{MAX_Z:.1f},max({MAX_Z:.1f}-on*{ZOOM_STEP:.4f},1.0))':"
+        f"x='trunc(iw/2-(iw/zoom/2))':"
+        f"y='trunc(ih/2-(ih/zoom/2))':"
+        f"d={d}:fps={fps}:s={W}x{H}"
+    )
+
+
+def _pan_right(duration: float, fps: int = FPS) -> str:
+    """Horizontal pan left-to-right at fixed 1.2× zoom."""
+    d = max(1, int(duration * fps))
+    travel = f"(iw-iw/1.2)"
+    return (
+        f"scale={SW}:{SH},"
+        f"zoompan="
+        f"z='1.2':"
+        f"x='trunc({travel}*(on-1)/({d}-1))':"
+        f"y='trunc(ih/2-(ih/1.2/2))':"
+        f"d={d}:fps={fps}:s={W}x{H}"
+    )
+
+
+def _pan_left(duration: float, fps: int = FPS) -> str:
+    """Horizontal pan right-to-left at fixed 1.2× zoom."""
+    d = max(1, int(duration * fps))
+    travel = f"(iw-iw/1.2)"
+    return (
+        f"scale={SW}:{SH},"
+        f"zoompan="
+        f"z='1.2':"
+        f"x='trunc({travel}*(1-(on-1)/({d}-1)))':"
+        f"y='trunc(ih/2-(ih/1.2/2))':"
+        f"d={d}:fps={fps}:s={W}x{H}"
+    )
+
+
+def _tilt_up(duration: float, fps: int = FPS) -> str:
+    """Vertical pan top-to-bottom at fixed 1.2× zoom."""
+    d = max(1, int(duration * fps))
+    travel = f"(ih-ih/1.2)"
+    return (
+        f"scale={SW}:{SH},"
+        f"zoompan="
+        f"z='1.2':"
+        f"x='trunc(iw/2-(iw/1.2/2))':"
+        f"y='trunc({travel}*(on-1)/({d}-1))':"
+        f"d={d}:fps={fps}:s={W}x{H}"
+    )
+
+
+def _tilt_down(duration: float, fps: int = FPS) -> str:
+    """Vertical pan bottom-to-top at fixed 1.2× zoom."""
+    d = max(1, int(duration * fps))
+    travel = f"(ih-ih/1.2)"
+    return (
+        f"scale={SW}:{SH},"
+        f"zoompan="
+        f"z='1.2':"
+        f"x='trunc(iw/2-(iw/1.2/2))':"
+        f"y='trunc({travel}*(1-(on-1)/({d}-1)))':"
+        f"d={d}:fps={fps}:s={W}x{H}"
+    )
+
+
+def _static(duration: float, fps: int = FPS) -> str:
+    """Static frame — no motion at all (guaranteed stable)."""
+    d = max(1, int(duration * fps))
+    return (
+        f"scale={SW}:{SH},"
+        f"zoompan="
+        f"z='1.0':"
+        f"x='trunc(iw/2-(iw/2))':"
+        f"y='trunc(ih/2-(ih/2))':"
+        f"d={d}:fps={fps}:s={W}x{H}"
+    )
+
+
+# Ordered list — index is used for DETERMINISTIC selection (no random)
+MOTION_EFFECTS: List = [
+    _zoom_in,    # 0
+    _zoom_out,   # 1
+    _pan_right,  # 2
+    _pan_left,   # 3
+    _tilt_up,    # 4
+    _tilt_down,  # 5
+    _static,     # 6  — fall-back for scenes where motion would look bad
+]
+
+# Effect name → function map (for StillToMotion / API requests)
+EFFECT_MAP = {fn.__name__.lstrip("_"): fn for fn in MOTION_EFFECTS}
+# keys: zoom_in, zoom_out, pan_right, pan_left, tilt_up, tilt_down, static
+
+
+# ─── Transition presets ───────────────────────────────────────────────────────
+TRANSITIONS = [
+    "fade", "fadeblack", "fadewhite",
+    "slideleft", "slideright", "slideup", "slidedown",
+    "smoothleft", "smoothright",
+    "dissolve",
+]
+# Deterministic transition selection: cycle through by scene index
+def _pick_transition(scene_index: int) -> str:
+    return TRANSITIONS[scene_index % len(TRANSITIONS)]
+
+
+# ─── Font loader ──────────────────────────────────────────────────────────────
+
+def _find_font(size: int) -> ImageFont.FreeTypeFont:
+    for path in [
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+    ]:
+        if Path(path).exists():
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+
+# ─── Text overlay (PIL) ───────────────────────────────────────────────────────
+
+def create_text_overlay(
+    text: str,
+    output_path: Path,
+    font_size: int = 38,
+    width: int = W,
+    height: int = H,
+    y_pos: int = 80,
+    color: tuple = (255, 255, 255, 255),
+    box_color: tuple = (0, 0, 0, 160),
+    max_width_fraction: float = 0.88,
+) -> Path:
+    """Renders word-wrapped text onto a transparent PNG for FFmpeg overlay."""
+    img  = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    font = _find_font(font_size)
+    max_w = int(width * max_width_fraction)
+
+    words, lines, current = text.split(), [], []
+    for word in words:
+        test = " ".join(current + [word])
+        if draw.textlength(test, font=font) > max_w:
+            if current:
+                lines.append(" ".join(current))
+                current = [word]
+            else:
+                lines.append(word)
+        else:
+            current.append(word)
+    if current:
+        lines.append(" ".join(current))
+
+    curr_y = y_pos
+    pad = 12
+    for line in lines:
+        w   = draw.textlength(line, font=font)
+        x   = int((width - w) / 2)
+        bbox = [x - pad, curr_y - pad, x + w + pad, curr_y + font_size + pad]
+        draw.rounded_rectangle(bbox, radius=8, fill=box_color)
+        draw.text((x, curr_y), line, font=font, fill=color)
+        curr_y += font_size + 14
+
+    img.save(output_path, format="PNG")
+    return output_path
+
+
+# ─── Scene subtitle overlay ───────────────────────────────────────────────────
+
+def create_subtitle_overlay(
+    lines: List[Tuple[str, float, float]],  # [(text, start_t, end_t), ...]
+    video_path: Path,
+    output_path: Path,
+    font_size: int = 32,
+    fps: int = FPS,
+) -> Path:
+    """
+    Burns subtitle cards into a video using PIL + FFmpeg overlay filter.
+    Each line appears at start_t and disappears at end_t.
+    Falls back gracefully if FFmpeg drawtext is unavailable.
+    """
+    if not lines:
+        return video_path
+
+    # Build a Python-drawn subtitle overlay image per segment using
+    # FFmpeg's overlay with enable= timing expressions.
+    # This avoids drawtext font path issues across OS.
+    overlays_args: List[str] = []
+    inputs: List[str] = ["-i", str(video_path)]
+    filter_parts: List[str] = []
+    prev = "0:v"
+
+    tmp_dir = output_path.parent
+
+    for idx, (text, t_start, t_end) in enumerate(lines):
+        overlay_path = tmp_dir / f"sub_{idx:04d}.png"
+        create_text_overlay(
+            text, overlay_path,
+            font_size=font_size,
+            y_pos=H - 200,
+            color=(255, 255, 255, 255),
+            box_color=(0, 0, 0, 190),
+        )
+        inputs += ["-i", str(overlay_path)]
+        out_label = f"sv{idx}"
+        # input index = idx + 1 (0 is the video)
+        filter_parts.append(
+            f"[{prev}][{idx + 1}:v]overlay="
+            f"enable='between(t,{t_start:.3f},{t_end:.3f})'[{out_label}]"
+        )
+        prev = out_label
+
+    filter_complex = ";".join(filter_parts)
+    cmd = (
+        ["ffmpeg", "-y"]
+        + inputs
+        + [
+            "-filter_complex", filter_complex,
+            "-map", f"[{prev}]",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-c:a", "copy",
+            "-pix_fmt", "yuv420p",
+            "-r", str(fps),
+            str(output_path),
+        ]
+    )
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0:
+        print(f"[renderer] Subtitle overlay failed, using raw video: {result.stderr.decode()[-300:]}")
+        return video_path
+    return output_path
+
+
+# ─── Per-scene clip builder ───────────────────────────────────────────────────
+
+def build_scene_clip(
+    img_path: Path,
+    duration: float,
+    output_path: Path,
+    effect_fn=None,
+    fps: int = FPS,
+    ai_clip_path: Optional[Path] = None,
+) -> None:
+    """
+    Builds a single scene clip, either from:
+      A) An AI-generated video clip (Layer C) — preferred if provided
+      B) A still image with a deterministic motion effect (Layer A fallback)
+
+    The output is always W×H @ fps, yuv420p.
+    """
+    # Layer C: use the AI-generated clip if available and valid
+    if ai_clip_path and ai_clip_path.exists() and ai_clip_path.stat().st_size > 10_000:
+        _normalize_clip(ai_clip_path, output_path, duration, fps)
+        return
+
+    # Layer A: deterministic Ken Burns effect
+    if effect_fn is None:
+        effect_fn = _zoom_in  # safe deterministic default
+
+    vf = effect_fn(duration, fps)
+
+    result = subprocess.run([
+        "ffmpeg", "-y",
+        "-loop", "1",
+        "-framerate", str(fps),   # input framerate hint
+        "-i", str(img_path),
+        "-vf", vf,
+        "-t", str(duration),
+        "-pix_fmt", "yuv420p",
+        "-r", str(fps),           # output framerate — must match fps= in zoompan
+        "-c:v", "libx264",
+        "-preset", "fast",
+        str(output_path),
+    ], capture_output=True)
+
+    if result.returncode != 0:
+        err = result.stderr.decode()[-500:]
+        raise ValueError(f"Scene clip failed ({img_path.name}): {err}")
+
+
+def _normalize_clip(
+    src: Path,
+    dst: Path,
+    duration: float,
+    fps: int,
+) -> None:
+    """Re-encodes a clip to exact W×H @ fps. Used for AI video clips."""
+    result = subprocess.run([
+        "ffmpeg", "-y",
+        "-i", str(src),
+        "-vf", f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
+               f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1",
+        "-t", str(duration),
+        "-r", str(fps),
+        "-pix_fmt", "yuv420p",
+        "-c:v", "libx264",
+        "-preset", "fast",
+        str(dst),
+    ], capture_output=True)
+    if result.returncode != 0:
+        raise ValueError(
+            f"Clip normalization failed: {result.stderr.decode()[-300:]}"
+        )
+
+
+# ─── Final video assembler ────────────────────────────────────────────────────
+
+def build_final_video(
+    scene_clips: List[Tuple[Path, float]],   # [(clip_path, duration), ...]
+    audio_path: Path,
+    hook_text: str,
+    cta_text: str,
+    actual_duration: float,
+    output_path: Path,
+    tmp: Path,
+    fps: int = FPS,
+    transition_duration: float = 0.5,
+    subtitle_lines: Optional[List[Tuple[str, float, float]]] = None,
+) -> Path:
+    """
+    Full deterministic composition:
+      1. Chain scene clips with xfade transitions
+      2. Composite hook overlay (first 3 s) and CTA overlay (last 5 s)
+      3. Burn subtitles (optional)
+      4. Mix audio
+      5. Write final MP4
+    """
+    # 1. Chain clips
+    if len(scene_clips) == 1:
+        chained = scene_clips[0][0]
+    else:
+        chained = _chain_with_transitions(scene_clips, tmp, fps, transition_duration)
+
+    # 2. Text overlays
+    hook_overlay = tmp / "hook.png"
+    cta_overlay  = tmp / "cta.png"
+    create_text_overlay(
+        hook_text, hook_overlay,
+        font_size=40, y_pos=88,
+        color=(255, 255, 255, 255), box_color=(0, 0, 0, 175),
+    )
+    create_text_overlay(
+        cta_text, cta_overlay,
+        font_size=36, y_pos=H - 195,
+        color=(255, 220, 50, 255), box_color=(0, 0, 0, 185),
+    )
+
+    cta_start = max(0.0, actual_duration - 5.0)
+    overlaid   = tmp / "overlaid.mp4"
+    result = subprocess.run([
+        "ffmpeg", "-y",
+        "-i", str(chained),
+        "-i", str(hook_overlay),
+        "-i", str(cta_overlay),
+        "-filter_complex",
+        f"[0:v][1:v]overlay=enable='between(t,0,3)'[v1];"
+        f"[v1][2:v]overlay=enable='between(t,{cta_start:.3f},{actual_duration:.3f})'[vout]",
+        "-map", "[vout]",
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-pix_fmt", "yuv420p",
+        "-r", str(fps),
+        str(overlaid),
+    ], capture_output=True)
+
+    if result.returncode != 0:
+        raise ValueError(
+            f"Overlay composite failed: {result.stderr.decode()[-600:]}"
+        )
+
+    # 3. Subtitles (optional)
+    subtitled = overlaid
+    if subtitle_lines:
+        sub_out = tmp / "subtitled.mp4"
+        subtitled = create_subtitle_overlay(
+            subtitle_lines, overlaid, sub_out, fps=fps
+        )
+
+    # 4. Audio mux
+    result = subprocess.run([
+        "ffmpeg", "-y",
+        "-i", str(subtitled),
+        "-i", str(audio_path),
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-shortest",
+        str(output_path),
+    ], capture_output=True)
+
+    if result.returncode != 0:
+        raise ValueError(
+            f"Audio mux failed: {result.stderr.decode()[-600:]}"
+        )
+
+    return output_path
+
+
+# ─── TikTok / Hybrid pipeline renderer ───────────────────────────────────────
+
+async def render_video(
+    audio_path: Path,
+    image_paths: List[Tuple[Path, float]],  # [(img_path, duration), ...]
+    script: dict,
+    job_id: str,
+    actual_duration: float,
+    ai_clip_paths: Optional[List[Optional[Path]]] = None,  # Layer C clips
+    subtitle_lines: Optional[List[Tuple[str, float, float]]] = None,
+) -> Path:
+    """
+    Main render entry-point for the hybrid pipeline.
+
+    Effect selection is DETERMINISTIC (scene index % len(MOTION_EFFECTS)).
+    AI clips are used when available; still images animate as fallback.
+    """
+    output_path = OUTPUT_DIR / f"{job_id}_final.mp4"
+    fps         = FPS
+
+    # Sanity checks
+    if not audio_path.exists() or audio_path.stat().st_size < 100:
+        raise ValueError(f"Audio file missing/corrupt: {audio_path.name}")
+    for img_path, _ in image_paths:
+        if not img_path.exists() or img_path.stat().st_size < 500:
+            raise ValueError(f"Image file missing/corrupt: {img_path.name}")
+
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp = Path(tmp_str)
+
+        scene_clips: List[Tuple[Path, float]] = []
+        n = len(image_paths)
+
+        for i, (img_path, duration) in enumerate(image_paths):
+            # Deterministic effect selection: no randomness
+            effect_fn  = MOTION_EFFECTS[i % len(MOTION_EFFECTS)]
+            ai_clip    = (ai_clip_paths[i] if ai_clip_paths and i < len(ai_clip_paths)
+                          else None)
+            clip_path  = tmp / f"clip_{i:02d}.mp4"
+
+            build_scene_clip(
+                img_path, duration, clip_path,
+                effect_fn=effect_fn, fps=fps,
+                ai_clip_path=ai_clip,
+            )
+            scene_clips.append((clip_path, duration))
+
+        build_final_video(
+            scene_clips=scene_clips,
+            audio_path=audio_path,
+            hook_text=script.get("hook", ""),
+            cta_text=script.get("cta", ""),
+            actual_duration=actual_duration,
+            output_path=output_path,
+            tmp=tmp,
+            fps=fps,
+            transition_duration=0.5,
+            subtitle_lines=subtitle_lines,
+        )
+
+    return output_path
+
+
+# ─── Still Image → Motion renderer ───────────────────────────────────────────
+
+async def render_still_to_motion(
+    image_path: Path,
+    audio_path: Path,
+    hook_text: str,
+    cta_text: str,
+    actual_duration: float,
+    job_id: str,
+    effect_fn=None,
+) -> Path:
+    """
+    Single-image Ken Burns animation pipeline.
+    Uses _zoom_in by default if no effect_fn is specified.
+    """
+    output_path = OUTPUT_DIR / f"{job_id}_final.mp4"
+    fps         = FPS
+
+    if effect_fn is None:
+        effect_fn = _zoom_in  # deterministic default
+
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp = Path(tmp_str)
+        clip_path = tmp / "clip_00.mp4"
+        build_scene_clip(image_path, actual_duration, clip_path,
+                         effect_fn=effect_fn, fps=fps)
+
+        build_final_video(
+            scene_clips=[(clip_path, actual_duration)],
+            audio_path=audio_path,
+            hook_text=hook_text,
+            cta_text=cta_text,
+            actual_duration=actual_duration,
+            output_path=output_path,
+            tmp=tmp,
+            fps=fps,
+        )
+
+    return output_path
+
+
+# ─── Private helpers ──────────────────────────────────────────────────────────
+
+def _chain_with_transitions(
+    scene_clips: List[Tuple[Path, float]],
+    tmp: Path,
+    fps: int,
+    transition_duration: float,
+) -> Path:
+    """
+    Chains multiple clips using xfade transitions.
+    Transition selection is DETERMINISTIC (by scene position).
+    Falls back to simple concat if xfade is unavailable.
+    """
+    inputs: List[str] = []
+    for clip_path, _ in scene_clips:
+        inputs += ["-i", str(clip_path)]
+
+    n             = len(scene_clips)
+    chain_filter  = ""
+    prev_label    = "0:v"
+    offset        = 0.0
+
+    for i in range(1, n):
+        transition = _pick_transition(i)
+        offset    += scene_clips[i - 1][1] - transition_duration
+        offset     = max(0.0, offset)
+        out_label  = f"v{i}"
+        chain_filter += (
+            f"[{prev_label}][{i}:v]xfade=transition={transition}:"
+            f"duration={transition_duration}:offset={offset:.3f}[{out_label}];"
+        )
+        prev_label = out_label
+
+    chain_filter = chain_filter.rstrip(";")
+    output_path  = tmp / "chained.mp4"
+
+    cmd = ["ffmpeg", "-y"] + inputs + [
+        "-filter_complex", chain_filter,
+        "-map", f"[{prev_label}]",
+        "-pix_fmt", "yuv420p",
+        "-r", str(fps),
+        "-c:v", "libx264",
+        "-preset", "fast",
+        str(output_path),
+    ]
+
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0:
+        print("[renderer] xfade unavailable, falling back to concat")
+        return _chain_with_concat(scene_clips, tmp, fps)
+
+    return output_path
+
+
+def _chain_with_concat(
+    scene_clips: List[Tuple[Path, float]],
+    tmp: Path,
+    fps: int,
+) -> Path:
+    """Hard-cut concat fallback when xfade is not available."""
+    # Re-encode all clips to ensure uniform codec/fps before concat
+    concat_file = tmp / "concat.txt"
+    lines = [f"file '{clip}'\n" for clip, _ in scene_clips]
+    concat_file.write_text("".join(lines))
+
+    output_path = tmp / "chained.mp4"
+    result = subprocess.run([
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", str(concat_file),
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-r", str(fps),
+        str(output_path),
+    ], capture_output=True)
+
+    if result.returncode != 0:
+        raise ValueError(
+            f"Concat fallback failed: {result.stderr.decode()[-400:]}"
+        )
+    return output_path
+
+    """
+ADD THIS TO THE BOTTOM OF services/renderer.py
+═══════════════════════════════════════════════════════════════════════════════
+
+Paste everything below the last line of renderer.py.
+It uses all the same constants (FPS, W, H) already defined there.
+No new imports needed — all are already at the top of renderer.py.
+"""
+
+
+async def render_avatar_video(
+    avatar_clip: Path,                          # animated talking head MP4
+    audio_path: Path,                           # clean TTS audio
+    image_paths: list,                          # B-roll [(Path, duration), ...]
+    script: dict,
+    job_id: str,
+    actual_duration: float,
+) -> Path:
+    """
+    Composes the final avatar video:
+      1. Normalise avatar clip to W×H @ FPS
+      2. Replace audio with clean TTS track (avatar clip audio is discarded)
+      3. Add hook overlay (first 3s) and CTA overlay (last 5s)
+      4. Write final MP4
+
+    B-roll images are generated but not composited yet (future: pip layout).
+    They are kept for potential future use without re-generation cost.
+    """
+    output_path = OUTPUT_DIR / f"{job_id}_final.mp4"
+
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp = Path(tmp_str)
+
+        # ── Step 1: normalise avatar clip ─────────────────────────────────────
+        normalised = tmp / "avatar_normalised.mp4"
+        _normalize_clip(avatar_clip, normalised, actual_duration, FPS)
+
+        # ── Step 2: text overlays ─────────────────────────────────────────────
+        hook_overlay = tmp / "hook.png"
+        cta_overlay  = tmp / "cta.png"
+
+        create_text_overlay(
+            script.get("hook", ""),
+            hook_overlay,
+            font_size=40, y_pos=88,
+            color=(255, 255, 255, 255),
+            box_color=(0, 0, 0, 175),
+        )
+        create_text_overlay(
+            script.get("cta", ""),
+            cta_overlay,
+            font_size=36, y_pos=H - 195,
+            color=(255, 220, 50, 255),
+            box_color=(0, 0, 0, 185),
+        )
+
+        cta_start = max(0.0, actual_duration - 5.0)
+
+        # ── Step 3: composite overlays + replace audio ─────────────────────────
+        result = subprocess.run([
+            "ffmpeg", "-y",
+            "-i", str(normalised),
+            "-i", str(hook_overlay),
+            "-i", str(cta_overlay),
+            "-i", str(audio_path),
+            "-filter_complex",
+            f"[0:v][1:v]overlay=enable='between(t,0,3)'[v1];"
+            f"[v1][2:v]overlay=enable='between(t,{cta_start:.3f},{actual_duration:.3f})'[vout]",
+            "-map", "[vout]",
+            "-map", "3:a",              # use clean TTS audio, discard avatar audio
+            "-c:v", "libx264",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-shortest",
+            "-pix_fmt", "yuv420p",
+            "-r", str(FPS),
+            str(output_path),
+        ], capture_output=True)
+
+        if result.returncode != 0:
+            raise ValueError(
+                f"Avatar render failed: {result.stderr.decode()[-600:]}"
+            )
+
+    return output_path

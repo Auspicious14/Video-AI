@@ -1,0 +1,22 @@
+{
+  "name": "videoai-remotion-templates",
+  "version": "1.0.0",
+  "description": "Remotion motion design templates for VideoAI.ng",
+  "scripts": {
+    "start": "remotion studio",
+    "build": "remotion render",
+    "render": "remotion render"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.290",
+    "remotion": "4.0.290"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "remotion": {
+    "entryPoint": "./src/index.ts"
+  }
+}

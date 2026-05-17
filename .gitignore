@@ -1,0 +1,31 @@
+# Environments
+.venv/
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project Specific
+outputs/
+wav2lip/checkpoints/*.pth
+wav2lip/checkpoints/*.pk
+wav2lip/temp/
+wav2lip/results/
+!wav2lip/checkpoints/README.md
+
+# Node / Remotion
+node_modules/
+remotion-templates/node_modules/
+remotion-templates/out/
+remotion-templates/.remotion/
+.npm
+.eslintcache

@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>VideoAI.ng — AI Video Generator</title>
+<meta name="description" content="Generate viral AI videos in seconds. All types: TikTok clips, avatars, still-to-motion, AI video. Pay in Naira."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#080b12;--surface:#0f1420;--border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.15);--ink:#f0f0f8;--muted:#6b7280;--accent:#7c5cfc;--accent2:#e8402a;--green:#22c55e;--r:14px}
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:16px;scroll-behavior:smooth}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;overflow-x:hidden}
+.blob{position:fixed;border-radius:50%;filter:blur(120px);pointer-events:none;z-index:0}
+.b1{width:500px;height:500px;background:radial-gradient(circle,rgba(124,92,252,.18),transparent 70%);top:-100px;left:-80px}
+.b2{width:400px;height:400px;background:radial-gradient(circle,rgba(232,64,42,.13),transparent 70%);top:300px;right:-60px}
+nav{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:16px 40px;background:rgba(8,11,18,.88);backdrop-filter:blur(20px);border-bottom:1px solid var(--border)}
+.logo{font-family:'Syne',sans-serif;font-weight:800;font-size:20px;letter-spacing:-.5px}
+.logo span{color:var(--accent)}
+.nav-right{display:flex;gap:10px;align-items:center}
+#credits-display{background:rgba(255,255,255,.05);border:1px solid var(--border2);font-size:12px;font-weight:600;padding:5px 14px;border-radius:999px;display:none}
+.btn{font-family:'Inter',sans-serif;font-size:13px;font-weight:500;padding:8px 18px;border-radius:8px;cursor:pointer;border:1px solid var(--border2);background:rgba(255,255,255,.04);color:var(--ink);transition:all .18s}
+.btn:hover{background:rgba(255,255,255,.09)}
+.btn-p{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-p:hover{background:#6a4de8;border-color:#6a4de8;color:#fff}
+.btn-lg{padding:13px 28px;font-size:15px;border-radius:10px}
+.hero{position:relative;z-index:1;max-width:820px;margin:0 auto;padding:80px 40px 56px;text-align:center}
+.badge{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.04);border:1px solid var(--border2);font-size:11px;font-weight:600;letter-spacing:1.8px;text-transform:uppercase;padding:6px 16px;border-radius:999px;margin-bottom:26px;color:var(--muted)}
+.dot{width:6px;height:6px;background:var(--green);border-radius:50%;animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+h1{font-family:'Syne',sans-serif;font-weight:800;font-size:clamp(38px,6vw,68px);line-height:1;letter-spacing:-2.5px;margin-bottom:20px}
+h1 em{color:var(--accent);font-style:normal}
+.hero p{font-size:17px;color:var(--muted);line-height:1.7;max-width:520px;margin:0 auto 32px}
+.hero-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.sec{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 40px 72px}
+.sec-label{font-family:'Syne',sans-serif;font-weight:700;font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:var(--muted);margin-bottom:20px;display:flex;align-items:center;gap:10px}
+.sec-label::after{content:'';flex:1;height:1px;background:var(--border)}
+/* Mode tabs */
+.mtabs{display:flex;flex-wrap:wrap;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:5px;margin-bottom:22px}
+.mtab{flex:1;min-width:120px;text-align:center;padding:10px 8px;border-radius:9px;font-size:13px;font-weight:500;cursor:pointer;color:var(--muted);transition:all .18s;border:none;background:transparent;position:relative}
+.mtab:hover{color:var(--ink)}
+.mtab.active{background:var(--accent);color:#fff}
+.mtab .badge-new{position:absolute;top:5px;right:6px;background:#e8402a;color:#fff;font-size:8px;font-weight:700;letter-spacing:.5px;padding:1px 5px;border-radius:99px}
+/* Card + forms */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:32px}
+.panel{display:none}.panel.active{display:block}
+.fg{display:flex;flex-direction:column;gap:7px;margin-bottom:16px}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.full{grid-column:1/-1}
+label{font-size:12px;font-weight:600;letter-spacing:.4px;color:var(--muted);text-transform:uppercase}
+input,select,textarea{font-family:'Inter',sans-serif;font-size:14px;padding:11px 14px;border-radius:9px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--ink);outline:none;transition:border-color .15s;width:100%}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+input::placeholder,textarea::placeholder{color:var(--muted)}
+textarea{resize:vertical;min-height:80px}
+select option{background:#0f1420}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:var(--muted);transition:all .15s}
+.chip:hover{border-color:var(--border2);color:var(--ink)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+/* Toggle */
+.trow{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:9px;margin-bottom:10px}
+.trow-info strong{font-size:13px;font-weight:600}
+.trow-info span{font-size:11px;color:var(--muted);display:block;margin-top:2px}
+.tog{position:relative;width:40px;height:22px;cursor:pointer;flex-shrink:0}
+.tog input{opacity:0;width:0;height:0}
+.tk{position:absolute;inset:0;background:var(--border);border-radius:999px;transition:.2s}
+.tog input:checked+.tk{background:var(--accent)}
+.tk::after{content:'';position:absolute;width:16px;height:16px;background:#fff;border-radius:50%;top:3px;left:3px;transition:.2s}
+.tog input:checked+.tk::after{left:21px}
+/* Avatar style grid */
+.av-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.av-card{border:2px solid var(--border);border-radius:10px;padding:14px 10px;text-align:center;cursor:pointer;transition:all .15s}
+.av-card:hover{border-color:var(--border2)}
+.av-card.on{border-color:var(--accent);background:rgba(124,92,252,.12)}
+.av-card .av-icon{font-size:26px;margin-bottom:6px}
+.av-card strong{display:block;font-size:12px;font-weight:600}
+.av-card span{font-size:11px;color:var(--muted);display:block;margin-top:2px}
+.av-card .av-tier{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.5px;padding:2px 6px;border-radius:99px;margin-top:4px;background:rgba(124,92,252,.2);color:var(--accent)}
+.av-card.premium-card .av-tier{background:rgba(232,64,42,.2);color:#ff7c6e}
+/* File upload */
+.upload-zone{border:2px dashed var(--border);border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:border-color .15s;position:relative}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent)}
+.upload-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-zone .uz-icon{font-size:28px;margin-bottom:8px}
+.upload-zone p{font-size:13px;color:var(--muted)}
+.upload-zone strong{display:block;font-size:14px;font-weight:600;margin-bottom:4px}
+.file-name{font-size:12px;color:var(--green);margin-top:8px;font-weight:500}
+/* Gen row */
+.gen-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-top:20px;padding-top:20px;border-top:1px solid var(--border)}
+.cost-note{font-size:12px;color:var(--muted)}
+.cost-note strong{color:var(--ink)}
+/* Progress */
+.prog-area{margin-top:22px;display:none;background:rgba(255,255,255,.03);border-radius:12px;padding:22px;border:1px solid var(--border)}
+.prog-area.show{display:block}
+.prog-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.prog-top h4{font-size:14px;font-weight:600}
+.prog-pct{font-size:13px;font-weight:700;color:var(--accent)}
+.pbar{height:4px;background:var(--border);border-radius:4px;overflow:hidden;margin-bottom:18px}
+.pbar-fill{height:100%;background:linear-gradient(90deg,var(--accent),#c084fc);border-radius:4px;width:0%;transition:width .5s}
+.steps{display:flex;flex-direction:column;gap:9px}
+.step{display:flex;align-items:center;gap:11px;font-size:13px;color:var(--muted)}
+.step.on{color:var(--ink);font-weight:500}
+.step.done{color:var(--green)}
+.sicon{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;transition:all .2s}
+.step.on .sicon{border-color:var(--accent);background:var(--accent);color:#fff;box-shadow:0 0 12px rgba(124,92,252,.5);animation:glow 1.2s infinite}
+.step.done .sicon{border-color:var(--green);background:var(--green);color:#fff}
+@keyframes glow{0%,100%{box-shadow:0 0 12px rgba(124,92,252,.5)}50%{box-shadow:0 0 22px rgba(124,92,252,.8)}}
+#status-detail{font-size:11px;color:var(--muted);margin-top:10px;min-height:16px}
+/* Result */
+.result{margin-top:20px;display:none;border-radius:var(--r);overflow:hidden;border:1px solid var(--border)}
+.result.show{display:block}
+.result-hdr{background:linear-gradient(135deg,var(--accent),#c084fc);padding:14px 22px;display:flex;justify-content:space-between;align-items:center}
+.result-hdr h3{font-family:'Syne',sans-serif;font-weight:700;font-size:15px}
+.result-hdr span{font-size:12px;opacity:.8}
+.result-body{padding:22px;background:var(--surface)}
+.vwrap{background:#000;border-radius:10px;overflow:hidden;display:flex;justify-content:center;margin-bottom:16px}
+video{max-height:440px;max-width:100%}
+.meta2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.mi{background:rgba(255,255,255,.04);border-radius:8px;padding:12px 14px}
+.ml{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.mv{font-size:13px;font-weight:500;line-height:1.4}
+.act-row{display:flex;gap:10px}
+.dl-btn{flex:1;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:9px;font-family:'Inter',sans-serif;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+.dl-btn:hover{background:#6a4de8}
+.sec-btn{padding:12px 18px;border:1px solid var(--border2);background:transparent;color:var(--ink);border-radius:9px;font-family:'Inter',sans-serif;font-size:14px;cursor:pointer;transition:all .15s}
+.sec-btn:hover{background:rgba(255,255,255,.05)}
+/* How it works */
+.how{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.hc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:22px;position:relative;overflow:hidden}
+.hc-n{font-family:'Syne',sans-serif;font-weight:800;font-size:52px;color:rgba(124,92,252,.1);position:absolute;top:8px;right:14px;line-height:1}
+.hc h4{font-size:14px;font-weight:600;margin-bottom:5px}
+.hc p{font-size:12px;color:var(--muted);line-height:1.6}
+.hc-icon{font-size:22px;margin-bottom:10px}
+/* Pricing */
+.pg{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.pc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:24px 20px;transition:transform .18s,border-color .18s}
+.pc:hover{transform:translateY(-4px);border-color:var(--border2)}
+.pc.feat{background:linear-gradient(145deg,rgba(124,92,252,.18),rgba(192,132,252,.08));border-color:rgba(124,92,252,.4)}
+.pn{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.pp{font-family:'Syne',sans-serif;font-weight:800;font-size:32px;letter-spacing:-1px;margin-bottom:2px}
+.pcr{font-size:12px;color:var(--muted);margin-bottom:16px}
+.pf{list-style:none;margin-bottom:20px;display:flex;flex-direction:column;gap:7px}
+.pf li{font-size:12px;color:var(--muted);display:flex;gap:7px}
+.pf li::before{content:'✦';color:var(--accent);flex-shrink:0;font-size:9px;margin-top:2px}
+.pb{width:100%;padding:10px;border-radius:8px;font-family:'Inter',sans-serif;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--ink);transition:all .15s}
+.pb:hover{background:rgba(255,255,255,.06)}
+.pc.feat .pb{background:var(--accent);border-color:var(--accent);color:#fff}
+.pc.feat .pb:hover{background:#6a4de8}
+/* Modal */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;z-index:200;padding:20px}
+.overlay.show{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border2);border-radius:18px;padding:34px;width:100%;max-width:380px}
+.modal h2{font-family:'Syne',sans-serif;font-weight:700;font-size:22px;letter-spacing:-.5px;margin-bottom:6px}
+.modal p{font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6}
+/* Toast */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--surface);border:1px solid var(--border2);color:var(--ink);padding:13px 18px;border-radius:10px;font-size:13px;max-width:300px;transform:translateY(80px);opacity:0;transition:all .3s;z-index:300;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.err{border-color:rgba(232,64,42,.5);color:#ff7c6e}
+.toast.ok{border-color:rgba(34,197,94,.4);color:var(--green)}
+footer{position:relative;z-index:1;border-top:1px solid var(--border);padding:24px 40px;text-align:center;font-size:12px;color:var(--muted)}
+footer em{color:var(--accent);font-style:normal}
+@media(max-width:640px){
+  nav{padding:12px 16px}.hero{padding:52px 18px 36px}.sec{padding:0 16px 56px}.card{padding:20px 16px}
+  h1{font-size:36px;letter-spacing:-1.5px}.fgrid{grid-template-columns:1fr}.full{grid-column:1}.how,.pg{grid-template-columns:1fr}.meta2{grid-template-columns:1fr}.av-grid{grid-template-columns:1fr 1fr}.mtab{min-width:calc(50% - 3px)}
+}
+</style>
+</head>
+<body>
+<div class="blob b1"></div><div class="blob b2"></div>
+
+<nav>
+  <div class="logo">Video<span>AI</span>.ng</div>
+  <div class="nav-right">
+    <div id="credits-display">0 credits</div>
+    <button class="btn" id="login-btn" onclick="openModal()">Sign in</button>
+  </div>
+</nav>
+
+<div class="hero">
+  <div class="badge"><span class="dot"></span>Hybrid AI · Made in Nigeria</div>
+  <h1>Create <em>viral</em><br>videos in seconds</h1>
+  <p>AI writes your script, generates images, animates avatars, and renders a polished video — powered by free infrastructure.</p>
+  <div class="hero-btns">
+    <button class="btn btn-p btn-lg" onclick="goto('generator')">Generate a video →</button>
+    <button class="btn btn-lg" onclick="goto('pricing')">See pricing</button>
+  </div>
+</div>
+
+<!-- HOW IT WORKS -->
+<div class="sec">
+  <div class="sec-label">How it works</div>
+  <div class="how">
+    <div class="hc"><div class="hc-n">1</div><div class="hc-icon">✍️</div><h4>Script</h4><p>Gemini 2.5 writes a cinematic TikTok script from your topic in seconds.</p></div>
+    <div class="hc"><div class="hc-n">2</div><div class="hc-icon">🎨</div><h4>Assets</h4><p>FLUX.1-schnell generates HD scene images. gTTS creates the AI voiceover.</p></div>
+    <div class="hc"><div class="hc-n">3</div><div class="hc-icon">🎬</div><h4>Render</h4><p>FFmpeg composes a shake-free 30fps video with Ken Burns, transitions & subtitles.</p></div>
+  </div>
+</div>
+
+<!-- GENERATOR -->
+<div class="sec" id="generator">
+  <div class="sec-label">Video generator</div>
+
+  <div class="mtabs">
+    <button class="mtab active" onclick="switchMode('hybrid',this)">🔥 Hybrid</button>
+    <button class="mtab" onclick="switchMode('tiktok',this)">📱 TikTok</button>
+    <button class="mtab" onclick="switchMode('ai_video',this)">🤖 AI Video</button>
+    <button class="mtab" onclick="switchMode('still',this)">🖼️ Still→Motion</button>
+    <button class="mtab" onclick="switchMode('avatar',this)">🧑 Avatar Free<span class="badge-new">NEW</span></button>
+    <button class="mtab" onclick="switchMode('avatar_premium',this)">💎 Avatar Premium<span class="badge-new">NEW</span></button>
+  </div>
+
+  <div class="card">
+
+    <!-- ── HYBRID ── -->
+    <div class="panel active" id="panel-hybrid">
+      <div class="fgrid">
+        <div class="fg full"><label>What is your video about?</label><textarea id="h-topic" placeholder="e.g. Pre-eclampsia warning signs every pregnant woman should know"></textarea></div>
+        <div class="fg full"><label>Tone</label><div class="chips" id="h-tones"><div class="chip on" onclick="chip(this,'h-tones')">Educational</div><div class="chip" onclick="chip(this,'h-tones')">Urgent</div><div class="chip" onclick="chip(this,'h-tones')">Inspiring</div><div class="chip" onclick="chip(this,'h-tones')">Conversational</div></div></div>
+        <div class="fg"><label>Duration</label><div class="chips" id="h-durs"><div class="chip" onclick="chip(this,'h-durs')">15s</div><div class="chip on" onclick="chip(this,'h-durs')">30s</div><div class="chip" onclick="chip(this,'h-durs')">60s</div></div></div>
+        <div class="fg"><label>Brand name <span style="font-weight:400;text-transform:none">(optional)</span></label><input id="h-brand" type="text" placeholder="e.g. MaterAlert"/></div>
+        <div class="fg full"><label>Your email</label><input id="h-email" type="email" placeholder="you@example.com"/></div>
+        <div class="fg full">
+          <div class="trow"><div class="trow-info"><strong>🎬 AI Motion Clips</strong><span>Wan2.1 per scene — slower, more cinematic</span></div><label class="tog"><input type="checkbox" id="h-motion"/><div class="tk"></div></label></div>
+          <div class="trow"><div class="trow-info"><strong>💬 Subtitle Cards</strong><span>Burn word-by-word subtitles into video</span></div><label class="tog"><input type="checkbox" id="h-subs" checked/><div class="tk"></div></label></div>
+        </div>
+      </div>
+      <div class="gen-row"><div class="cost-note">Costs <strong>1 credit</strong></div><button class="btn btn-p btn-lg" onclick="gen('hybrid')">Generate →</button></div>
+    </div>
+
+    <!-- ── TIKTOK ── -->
+    <div class="panel" id="panel-tiktok">
+      <div class="fgrid">
+        <div class="fg full"><label>Video topic</label><textarea id="t-topic" placeholder="e.g. Top 3 mistakes Nigerian entrepreneurs make"></textarea></div>
+        <div class="fg full"><label>Tone</label><div class="chips" id="t-tones"><div class="chip on" onclick="chip(this,'t-tones')">Educational</div><div class="chip" onclick="chip(this,'t-tones')">Urgent</div><div class="chip" onclick="chip(this,'t-tones')">Inspiring</div><div class="chip" onclick="chip(this,'t-tones')">Conversational</div></div></div>
+        <div class="fg"><label>Duration</label><div class="chips" id="t-durs"><div class="chip" onclick="chip(this,'t-durs')">15s</div><div class="chip on" onclick="chip(this,'t-durs')">30s</div><div class="chip" onclick="chip(this,'t-durs')">60s</div></div></div>
+        <div class="fg"><label>Brand name</label><input id="t-brand" type="text" placeholder="Optional"/></div>
+        <div class="fg full"><label>Your email</label><input id="t-email" type="email" placeholder="you@example.com"/></div>
+      </div>
+      <div class="gen-row"><div class="cost-note">Costs <strong>1 credit</strong></div><button class="btn btn-p btn-lg" onclick="gen('tiktok')">Generate →</button></div>
+    </div>
+
+    <!-- ── AI VIDEO ── -->
+    <div class="panel" id="panel-ai_video">
+      <div class="fgrid">
+        <div class="fg full"><label>Describe your video</label><textarea id="av-prompt" placeholder="e.g. A cinematic shot of Lagos at golden hour, busy streets, aerial view"></textarea></div>
+        <div class="fg full"><label>Hook text <span style="font-weight:400;text-transform:none">(optional)</span></label><input id="av-hook" type="text" placeholder="Shown first 3 seconds"/></div>
+        <div class="fg full"><label>CTA text <span style="font-weight:400;text-transform:none">(optional)</span></label><input id="av-cta" type="text" placeholder="Shown last 5 seconds"/></div>
+        <div class="fg"><label>Duration</label><div class="chips" id="av-durs"><div class="chip" onclick="chip(this,'av-durs')">15s</div><div class="chip on" onclick="chip(this,'av-durs')">30s</div><div class="chip" onclick="chip(this,'av-durs')">60s</div></div></div>
+        <div class="fg"><label>Style</label><select id="av-style"><option value="">Auto</option><option value="cinematic">Cinematic</option><option value="documentary">Documentary</option><option value="animation">Animation</option></select></div>
+        <div class="fg full"><label>Your email</label><input id="av-email" type="email" placeholder="you@example.com"/></div>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:0px">Tries CogVideoX-5B → Wan2.1 → Ken Burns fallback. Always produces a video.</p>
+      <div class="gen-row"><div class="cost-note">Costs <strong>1 credit</strong></div><button class="btn btn-p btn-lg" onclick="gen('ai_video')">Generate →</button></div>
+    </div>
+
+    <!-- ── STILL TO MOTION ── -->
+    <div class="panel" id="panel-still">
+      <div class="fgrid">
+        <div class="fg full">
+          <label>Upload your image</label>
+          <div class="upload-zone" id="still-drop">
+            <input type="file" id="still-file" accept="image/*" onchange="fileChosen('still-file','still-fname')"/>
+            <div class="uz-icon">🖼️</div>
+            <strong>Click to upload or drag & drop</strong>
+            <p>JPEG, PNG, WebP · Any size</p>
+            <div class="file-name" id="still-fname"></div>
+          </div>
+        </div>
+        <div class="fg full"><label>Hook text</label><input id="s-hook" type="text" placeholder="Displayed at top of video for 3s"/></div>
+        <div class="fg full"><label>Call to action</label><input id="s-cta" type="text" placeholder="Displayed at bottom for last 5s"/></div>
+        <div class="fg full"><label>Narration (will be read aloud)</label><textarea id="s-narration" placeholder="Write what the voiceover should say..."></textarea></div>
+        <div class="fg"><label>Motion effect</label><select id="s-effect"><option value="">Auto (zoom in)</option><option value="zoom_in">Zoom In</option><option value="zoom_out">Zoom Out</option><option value="pan_right">Pan Right</option><option value="pan_left">Pan Left</option><option value="tilt_up">Tilt Up</option><option value="tilt_down">Tilt Down</option><option value="static">Static</option></select></div>
+        <div class="fg"><label>Your email</label><input id="s-email" type="email" placeholder="you@example.com"/></div>
+      </div>
+      <div class="gen-row"><div class="cost-note">Costs <strong>1 credit</strong></div><button class="btn btn-p btn-lg" onclick="gen('still')">Generate →</button></div>
+    </div>
+
+    <!-- ── AVATAR FREE ── -->
+    <div class="panel" id="panel-avatar">
+      <div class="fgrid">
+        <div class="fg full"><label>Choose avatar style</label>
+          <div class="av-grid" id="av-style-grid">
+            <div class="av-card on" onclick="avStyle(this,'doctor')"><div class="av-icon">👩‍⚕️</div><strong>Doctor</strong><span>Medical content</span><div class="av-tier">FREE</div></div>
+            <div class="av-card" onclick="avStyle(this,'presenter')"><div class="av-icon">🎙️</div><strong>Presenter</strong><span>News & announcements</span><div class="av-tier">FREE</div></div>
+            <div class="av-card" onclick="avStyle(this,'friend')"><div class="av-icon">😊</div><strong>Friend</strong><span>TikTok casual</span><div class="av-tier">FREE</div></div>
+          </div>
+        </div>
+        <div class="fg full"><label>Video topic</label><textarea id="af-topic" placeholder="e.g. 5 signs of high blood pressure you should never ignore"></textarea></div>
+        <div class="fg full"><label>Tone</label><div class="chips" id="af-tones"><div class="chip on" onclick="chip(this,'af-tones')">Educational</div><div class="chip" onclick="chip(this,'af-tones')">Urgent</div><div class="chip" onclick="chip(this,'af-tones')">Inspiring</div><div class="chip" onclick="chip(this,'af-tones')">Conversational</div></div></div>
+        <div class="fg"><label>Duration</label><div class="chips" id="af-durs"><div class="chip" onclick="chip(this,'af-durs')">15s</div><div class="chip on" onclick="chip(this,'af-durs')">30s</div><div class="chip" onclick="chip(this,'af-durs')">60s</div></div></div>
+        <div class="fg"><label>Brand name</label><input id="af-brand" type="text" placeholder="Optional"/></div>
+        <div class="fg full"><label>Your email</label><input id="af-email" type="email" placeholder="you@example.com"/></div>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:0">AI generates a face, then SadTalker lip-syncs it to your script. Falls back to hybrid if unavailable.</p>
+      <div class="gen-row"><div class="cost-note">Costs <strong>1 credit</strong></div><button class="btn btn-p btn-lg" onclick="gen('avatar')">Generate →</button></div>
+    </div>
+
+    <!-- ── AVATAR PREMIUM ── -->
+    <div class="panel" id="panel-avatar_premium">
+      <div class="fgrid">
+        <div class="fg full">
+          <label>Upload your face photo</label>
+          <div class="upload-zone">
+            <input type="file" id="ap-file" accept="image/*" onchange="fileChosen('ap-file','ap-fname')"/>
+            <div class="uz-icon">🤳</div>
+            <strong>Click to upload your photo</strong>
+            <p>Face clearly visible · Front-facing · JPEG or PNG</p>
+            <div class="file-name" id="ap-fname"></div>
+          </div>
+        </div>
+        <div class="fg full"><label>Video topic</label><textarea id="ap-topic" placeholder="e.g. Why every Nigerian needs health insurance"></textarea></div>
+        <div class="fg full"><label>Tone</label><div class="chips" id="ap-tones"><div class="chip on" onclick="chip(this,'ap-tones')">Educational</div><div class="chip" onclick="chip(this,'ap-tones')">Urgent</div><div class="chip" onclick="chip(this,'ap-tones')">Inspiring</div><div class="chip" onclick="chip(this,'ap-tones')">Conversational</div></div></div>
+        <div class="fg"><label>Duration</label><div class="chips" id="ap-durs"><div class="chip" onclick="chip(this,'ap-durs')">15s</div><div class="chip on" onclick="chip(this,'ap-durs')">30s</div><div class="chip" onclick="chip(this,'ap-durs')">60s</div></div></div>
+        <div class="fg"><label>Brand name</label><input id="ap-brand" type="text" placeholder="Optional"/></div>
+        <div class="fg full"><label>Your email</label><input id="ap-email" type="email" placeholder="you@example.com"/></div>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:0">Your photo is animated with SadTalker lip-sync. <strong style="color:var(--accent)">Premium — 2 credits.</strong></p>
+      <div class="gen-row"><div class="cost-note">Costs <strong>2 credits</strong></div><button class="btn btn-p btn-lg" onclick="gen('avatar_premium')">Generate →</button></div>
+    </div>
+
+    <!-- Progress (shared) -->
+    <div class="prog-area" id="prog-area">
+      <div class="prog-top"><h4 id="prog-title">Generating…</h4><span class="prog-pct" id="prog-pct">0%</span></div>
+      <div class="pbar"><div class="pbar-fill" id="pbar"></div></div>
+      <div class="steps" id="steps"></div>
+      <div id="status-detail"></div>
+    </div>
+
+    <!-- Result (shared) -->
+    <div class="result" id="result">
+      <div class="result-hdr"><h3>✅ Video ready</h3><span>Download & post to TikTok</span></div>
+      <div class="result-body">
+        <div class="vwrap"><video id="vid" controls playsinline></video></div>
+        <div class="meta2">
+          <div class="mi"><div class="ml">Caption</div><div class="mv" id="meta-cap">—</div></div>
+          <div class="mi"><div class="ml">Call to action</div><div class="mv" id="meta-cta">—</div></div>
+        </div>
+        <div class="act-row">
+          <button class="dl-btn" onclick="dlVideo()">⬇ Download MP4</button>
+          <button class="sec-btn" onclick="cpLink()">🔗 Copy link</button>
+          <button class="sec-btn" onclick="resetForm()">+ New video</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /card -->
+</div>
+
+<!-- PRICING -->
+<div class="sec" id="pricing">
+  <div class="sec-label">Pricing — pay in Naira</div>
+  <div class="pg">
+    <div class="pc">
+      <div class="pn">Starter</div><div class="pp">₦2,500</div><div class="pcr">5 credits</div>
+      <ul class="pf"><li>Hybrid AI pipeline</li><li>TikTok & AI Video</li><li>Ken Burns motion</li><li>MP4 download</li></ul>
+      <button class="pb" onclick="pay('starter')">Get started</button>
+    </div>
+    <div class="pc feat">
+      <div class="pn">Pro</div><div class="pp">₦5,000</div><div class="pcr">15 credits · most popular</div>
+      <ul class="pf"><li>Everything in Starter</li><li>Avatar (AI face)</li><li>Wan2.1 motion clips</li><li>Subtitle cards</li></ul>
+      <button class="pb" onclick="pay('pro')">Get Pro</button>
+    </div>
+    <div class="pc">
+      <div class="pn">Business</div><div class="pp">₦12,000</div><div class="pcr">50 credits</div>
+      <ul class="pf"><li>Everything in Pro</li><li>Premium avatar (own face)</li><li>CogVideoX-5B clips</li><li>Priority rendering</li></ul>
+      <button class="pb" onclick="pay('business')">Get Business</button>
+    </div>
+  </div>
+</div>
+
+<!-- LOGIN MODAL -->
+<div class="overlay" id="modal" onclick="closeModal(event)">
+  <div class="modal">
+    <h2>Sign in</h2>
+    <p>Enter your email to access your credits and video history.</p>
+    <div class="fg"><input type="email" id="m-email" placeholder="your@email.com"/></div>
+    <button class="btn btn-p" style="width:100%;padding:12px;font-size:14px" onclick="signIn()">Continue →</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<footer>Built in Nigeria · <em>VideoAI.ng</em> · Hybrid AI · 30fps · Shake-free · No paid APIs</footer>
+
+<script>
+const API = 'http://localhost:8000';
+let me = localStorage.getItem('vai_email') || null;
+let mode = 'hybrid';
+let avStyleSelected = 'doctor';
+let vidUrl = null;
+let pollTimer = null;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  if (me) { setEmail(me); showNav(); refreshCreds(); }
+});
+
+function goto(id){ document.getElementById(id).scrollIntoView({behavior:'smooth'}); }
+function setEmail(e){ ['h-email','t-email','av-email','s-email','af-email','ap-email'].forEach(id=>{ const el=document.getElementById(id); if(el)el.value=e; }); }
+function showNav(){ document.getElementById('credits-display').style.display='block'; document.getElementById('login-btn').style.display='none'; }
+async function refreshCreds(){
+  if(!me)return;
+  try{ const r=await fetch(`${API}/credits/${encodeURIComponent(me)}`); const d=await r.json(); document.getElementById('credits-display').textContent=`${d.credits} cr`; }catch{}
+}
+
+// ── Mode switch ───────────────────────────────────────────────────────────────
+function switchMode(m, el){
+  document.querySelectorAll('.mtab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-'+m).classList.add('active');
+  mode = m;
+  resetProgress();
+}
+
+// ── Chips ─────────────────────────────────────────────────────────────────────
+function chip(el, groupId){
+  document.querySelectorAll('#'+groupId+' .chip').forEach(c=>c.classList.remove('on'));
+  el.classList.add('on');
+}
+function getChip(groupId){ const c=document.querySelector('#'+groupId+' .chip.on'); return c?c.textContent.toLowerCase().replace('s','').trim():null; }
+function chipVal(groupId){ const c=document.querySelector('#'+groupId+' .chip.on'); return c?c.textContent:null; }
+function durVal(groupId){ const c=document.querySelector('#'+groupId+' .chip.on'); return c?parseInt(c.textContent):30; }
+
+// ── Avatar style ──────────────────────────────────────────────────────────────
+function avStyle(el, style){
+  document.querySelectorAll('#av-style-grid .av-card').forEach(c=>c.classList.remove('on'));
+  el.classList.add('on'); avStyleSelected=style;
+}
+
+// ── File chosen ───────────────────────────────────────────────────────────────
+function fileChosen(inputId, labelId){
+  const f=document.getElementById(inputId).files[0];
+  if(f) document.getElementById(labelId).textContent='✓ '+f.name;
+}
+
+// ── Generate ──────────────────────────────────────────────────────────────────
+async function gen(m){
+  resetProgress();
+  document.getElementById('result').classList.remove('show');
+
+  if(m==='hybrid')    return doHybrid();
+  if(m==='tiktok')    return doTiktok();
+  if(m==='ai_video')  return doAiVideo();
+  if(m==='still')     return doStill();
+  if(m==='avatar')    return doAvatar();
+  if(m==='avatar_premium') return doAvatarPremium();
+}
+
+function val(id){ return document.getElementById(id).value.trim(); }
+
+async function doHybrid(){
+  const email=val('h-email'), topic=val('h-topic');
+  if(!email) return toast('Enter your email','err');
+  if(!topic) return toast('Describe your video topic','err');
+  saveUser(email);
+  const body={ user_email:email, topic, tone:getChip('h-tones')||'educational',
+    duration:durVal('h-durs'), brand_name:val('h-brand')||null,
+    use_ai_motion:document.getElementById('h-motion').checked,
+    subtitles:document.getElementById('h-subs').checked };
+  startJob('/generate/hybrid', body, true, buildSteps(['script','audio','images','render'],'hybrid'));
+}
+
+async function doTiktok(){
+  const email=val('t-email'), topic=val('t-topic');
+  if(!email) return toast('Enter your email','err');
+  if(!topic) return toast('Describe your video topic','err');
+  saveUser(email);
+  const body={ user_email:email, topic, tone:getChip('t-tones')||'educational',
+    duration:durVal('t-durs'), brand_name:val('t-brand')||null };
+  startJob('/generate/tiktok', body, true, buildSteps(['script','audio','images','render'],'tiktok'));
+}
+
+async function doAiVideo(){
+  const email=val('av-email'), prompt=val('av-prompt');
+  if(!email) return toast('Enter your email','err');
+  if(!prompt) return toast('Describe your video','err');
+  saveUser(email);
+  const body={ user_email:email, prompt, duration:durVal('av-durs'),
+    style:val('av-style')||null, hook:val('av-hook')||null, cta:val('av-cta')||null };
+  startJob('/generate/ai-video', body, true, buildSteps(['plan','images','clips','render'],'ai_video'));
+}
+
+async function doStill(){
+  const email=val('s-email'), hook=val('s-hook'), cta=val('s-cta'), narration=val('s-narration');
+  const file=document.getElementById('still-file').files[0];
+  if(!email)     return toast('Enter your email','err');
+  if(!file)      return toast('Upload an image first','err');
+  if(!narration) return toast('Enter your narration text','err');
+  saveUser(email);
+
+  const fd=new FormData();
+  fd.append('user_email',email); fd.append('hook',hook||''); fd.append('cta',cta||'');
+  fd.append('narration',narration); fd.append('effect',val('s-effect')||'');
+  fd.append('image',file);
+  startJob('/generate/still-to-motion', fd, false, buildSteps(['audio','render'],'still'));
+}
+
+async function doAvatar(){
+  const email=val('af-email'), topic=val('af-topic');
+  if(!email) return toast('Enter your email','err');
+  if(!topic) return toast('Describe your video topic','err');
+  saveUser(email);
+  const body={ user_email:email, topic, tone:getChip('af-tones')||'educational',
+    duration:durVal('af-durs'), brand_name:val('af-brand')||null, avatar_style:avStyleSelected };
+  startJob('/generate/avatar', body, true, buildSteps(['script','audio','face','animate','render'],'avatar'));
+}
+
+async function doAvatarPremium(){
+  const email=val('ap-email'), topic=val('ap-topic');
+  const file=document.getElementById('ap-file').files[0];
+  if(!email) return toast('Enter your email','err');
+  if(!file)  return toast('Upload your face photo first','err');
+  if(!topic) return toast('Describe your video topic','err');
+  saveUser(email);
+
+  const fd=new FormData();
+  fd.append('user_email',email); fd.append('topic',topic);
+  fd.append('tone',getChip('ap-tones')||'educational');
+  fd.append('duration',durVal('ap-durs'));
+  fd.append('brand_name',val('ap-brand')||'');
+  fd.append('avatar_style',avStyleSelected);
+  fd.append('face_image',file);
+  startJob('/generate/avatar/premium', fd, false, buildSteps(['script','audio','animate','render'],'avatar_premium'));
+}
+
+// ── Job starter ───────────────────────────────────────────────────────────────
+async function startJob(endpoint, bodyOrFd, isJson, steps){
+  showProgress(steps);
+  try{
+    const opts={ method:'POST', body: isJson ? JSON.stringify(bodyOrFd) : bodyOrFd };
+    if(isJson) opts.headers={'Content-Type':'application/json'};
+    const r=await fetch(API+endpoint, opts);
+    if(r.status===402){ hideProgress(); toast('No credits — top up below','err'); goto('pricing'); return; }
+    if(!r.ok){ const d=await r.json(); throw new Error(d.detail||'Server error'); }
+    const {job_id}=await r.json();
+    poll(job_id, steps);
+  }catch(e){
+    hideProgress();
+    toast(e.message||'Cannot reach server — is the backend running?','err');
+  }
+}
+
+// ── Polling ───────────────────────────────────────────────────────────────────
+const STATUS_STEP = {
+  generating_script:'script', generating_audio:'audio', generating_images:'images',
+  generating_ai_motion:'motion', animating_avatar:'animate', planning_scenes:'plan',
+  generating_video_clips:'clips', rendering:'render'
+};
+
+function poll(jid, steps){
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer=setInterval(async()=>{
+    try{
+      const r=await fetch(`${API}/generate/jobs/${jid}`);
+      const j=await r.json();
+      const stepKey=STATUS_STEP[j.status];
+      if(stepKey) activateStep(stepKey, steps);
+      setProgress(j.progress||0, j.status?.replace(/_/g,' ')||'Working…');
+      if(j.status_detail) document.getElementById('status-detail').textContent=j.status_detail;
+      if(j.status==='done'){
+        clearInterval(pollTimer);
+        setProgress(100,'Done!'); allDone(steps);
+        showResult(j.video_url, j.caption, j.cta);
+        refreshCreds();
+      }
+      if(j.status==='failed'){
+        clearInterval(pollTimer); hideProgress();
+        toast('Failed: '+(j.error||'unknown error'),'err'); refreshCreds();
+      }
+    }catch{}
+  },2500);
+}
+
+// ── Step builders ─────────────────────────────────────────────────────────────
+const STEP_LABELS={
+  script:'Writing script (Gemini)', audio:'Generating voiceover',
+  images:'Creating scene images (FLUX.1)', motion:'AI motion clips (Wan2.1)',
+  render:'Rendering video (FFmpeg)', face:'Generating AI face',
+  animate:'Animating avatar (SadTalker)', plan:'Planning cinematic shots',
+  clips:'Generating AI video clips'
+};
+
+function buildSteps(keys){ return keys; }
+
+function showProgress(steps){
+  const c=document.getElementById('steps');
+  c.innerHTML=steps.map((k,i)=>`<div class="step" id="stp-${k}"><div class="sicon">${i+1}</div><div>${STEP_LABELS[k]||k}</div></div>`).join('');
+  document.getElementById('prog-area').classList.add('show');
+  setProgress(0,'Starting…');
+}
+
+function activateStep(key, steps){
+  const idx=steps.indexOf(key);
+  steps.forEach((k,i)=>{
+    const el=document.getElementById('stp-'+k); if(!el)return;
+    el.classList.remove('on','done');
+    const ic=el.querySelector('.sicon');
+    if(i<idx){el.classList.add('done');ic.textContent='✓';}
+    else if(i===idx){el.classList.add('on');ic.textContent=i+1;}
+  });
+}
+
+function allDone(steps){
+  steps.forEach(k=>{
+    const el=document.getElementById('stp-'+k); if(!el)return;
+    el.classList.remove('on'); el.classList.add('done');
+    el.querySelector('.sicon').textContent='✓';
+  });
+}
+
+function setProgress(pct,label){
+  document.getElementById('pbar').style.width=pct+'%';
+  document.getElementById('prog-pct').textContent=pct+'%';
+  document.getElementById('prog-title').textContent=label;
+}
+
+function resetProgress(){ document.getElementById('prog-area').classList.remove('show'); document.getElementById('status-detail').textContent=''; }
+function hideProgress(){ resetProgress(); }
+
+// ── Result ────────────────────────────────────────────────────────────────────
+function showResult(url, cap, cta){
+  vidUrl=API+url;
+  document.getElementById('vid').src=vidUrl;
+  document.getElementById('meta-cap').textContent=cap||'—';
+  document.getElementById('meta-cta').textContent=cta||'—';
+  document.getElementById('result').classList.add('show');
+  document.getElementById('result').scrollIntoView({behavior:'smooth'});
+  toast('Video ready! 🎉','ok');
+}
+function dlVideo(){ if(!vidUrl)return; const a=document.createElement('a'); a.href=vidUrl; a.download='videoai-ng.mp4'; a.click(); }
+function cpLink(){ if(!vidUrl)return; navigator.clipboard.writeText(vidUrl).then(()=>toast('Link copied!','ok')); }
+function resetForm(){ document.getElementById('result').classList.remove('show'); resetProgress(); window.scrollTo({top:0,behavior:'smooth'}); }
+
+// ── Payment ───────────────────────────────────────────────────────────────────
+async function pay(plan){
+  const email=me||val('h-email');
+  if(!email){ openModal(); toast('Sign in first','err'); return; }
+  try{
+    const r=await fetch(`${API}/payments/initialize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,plan})});
+    const d=await r.json();
+    if(d.authorization_url) window.location.href=d.authorization_url;
+    else toast('Payment error','err');
+  }catch{ toast('Cannot connect to server','err'); }
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function openModal(){ document.getElementById('modal').classList.add('show'); }
+function closeModal(e){ if(e.target.id==='modal') document.getElementById('modal').classList.remove('show'); }
+function saveUser(e){ me=e; localStorage.setItem('vai_email',e); }
+function signIn(){
+  const e=val('m-email'); if(!e.includes('@')) return toast('Invalid email','err');
+  saveUser(e); document.getElementById('modal').classList.remove('show');
+  setEmail(e); showNav(); refreshCreds(); toast('Signed in as '+e,'ok');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type=''){
+  const t=document.getElementById('toast'); t.textContent=msg;
+  t.className='toast show'+(type?' '+type:'');
+  setTimeout(()=>t.classList.remove('show'),3500);
+}
+
+// ── Paystack callback ─────────────────────────────────────────────────────────
+const ref=new URLSearchParams(location.search).get('reference')||new URLSearchParams(location.search).get('trxref');
+if(ref){ fetch(`${API}/payments/verify/${ref}`).then(r=>r.json()).then(d=>{ if(d.success){refreshCreds();showNav();toast('Payment successful! Credits added.','ok');} history.replaceState({},'',location.pathname); }); }
+</script>
+</body>
+</html>
