@@ -208,6 +208,7 @@ footer em{color:var(--accent);font-style:normal}
     <button class="mtab" onclick="switchMode('still',this)">🖼️ Still→Motion</button>
     <button class="mtab" onclick="switchMode('avatar',this)">🧑 Avatar Free<span class="badge-new">NEW</span></button>
     <button class="mtab" onclick="switchMode('avatar_premium',this)">💎 Avatar Premium<span class="badge-new">NEW</span></button>
+    <button class="mtab" onclick="switchMode('cinematic',this)">🎬 Cinematic<span class="badge-new">NEW</span></button>
   </div>
 
   <div class="card">
@@ -319,6 +320,18 @@ footer em{color:var(--accent);font-style:normal}
       <div class="gen-row"><div class="cost-note">Costs <strong>2 credits</strong></div><button class="btn btn-p btn-lg" onclick="gen('avatar_premium')">Generate →</button></div>
     </div>
 
+    <!-- ── CINEMATIC ── -->
+    <div class="panel" id="panel-cinematic">
+      <div class="fgrid">
+        <div class="fg full"><label>What's your cinematic story about?</label><textarea id="c-topic" placeholder="e.g. A Nigerian mother secretly struggling with worsening hypertension while caring for her daughter"></textarea></div>
+        <div class="fg"><label>Duration</label><div class="chips" id="c-durs"><div class="chip" onclick="chip(this,'c-durs')">30s</div><div class="chip on" onclick="chip(this,'c-durs')">45s</div><div class="chip" onclick="chip(this,'c-durs')">60s</div></div></div>
+        <div class="fg"><label>Tone</label><select id="c-tone"><option value="emotionally grounded">Emotionally Grounded</option><option value="dramatic">Dramatic</option><option value="inspirational">Inspirational</option><option value="tense">Tense</option></select></div>
+        <div class="fg full"><label>Your email</label><input id="c-email" type="email" placeholder="you@example.com"/></div>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:0">Uses cinematic state graph → scene intent → shot plan → render execution. Production-ready experimental feature.</p>
+      <div class="gen-row"><div class="cost-note">Costs <strong>1 credit</strong></div><button class="btn btn-p btn-lg" onclick="gen('cinematic')">Generate →</button></div>
+    </div>
+
     <!-- Progress (shared) -->
     <div class="prog-area" id="prog-area">
       <div class="prog-top"><h4 id="prog-title">Generating…</h4><span class="prog-pct" id="prog-pct">0%</span></div>
@@ -396,7 +409,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 function goto(id){ document.getElementById(id).scrollIntoView({behavior:'smooth'}); }
-function setEmail(e){ ['h-email','t-email','av-email','s-email','af-email','ap-email'].forEach(id=>{ const el=document.getElementById(id); if(el)el.value=e; }); }
+function setEmail(e){ ['h-email','t-email','av-email','s-email','af-email','ap-email','c-email'].forEach(id=>{ const el=document.getElementById(id); if(el)el.value=e; }); }
 function showNav(){ document.getElementById('credits-display').style.display='block'; document.getElementById('login-btn').style.display='none'; }
 async function refreshCreds(){
   if(!me)return;
@@ -445,6 +458,7 @@ async function gen(m){
   if(m==='still')     return doStill();
   if(m==='avatar')    return doAvatar();
   if(m==='avatar_premium') return doAvatarPremium();
+  if(m==='cinematic') return doCinematic();
 }
 
 function val(id){ return document.getElementById(id).value.trim(); }
@@ -524,8 +538,23 @@ async function doAvatarPremium(){
   startJob('/generate/avatar/premium', fd, false, buildSteps(['script','audio','animate','render'],'avatar_premium'));
 }
 
+async function doCinematic(){
+  const email=val('c-email'), topic=val('c-topic');
+  if(!email) return toast('Enter your email','err');
+  if(!topic) return toast('Describe your cinematic story','err');
+  saveUser(email);
+  const body={ 
+    user_email:email, 
+    topic:topic, 
+    duration_sec:durVal('c-durs'), 
+    tone:val('c-tone'), 
+    style:'cinematic realism'
+  };
+  startJob('/api/cinematic/generate', body, true, buildSteps(['cinematic_state','scene_intent','shot_planning','render_execution_plan','mapping_to_renderer','render'],'cinematic'), true);
+}
+
 // ── Job starter ───────────────────────────────────────────────────────────────
-async function startJob(endpoint, bodyOrFd, isJson, steps){
+async function startJob(endpoint, bodyOrFd, isJson, steps, isCinematic=false){
   showProgress(steps);
   try{
     const opts={ method:'POST', body: isJson ? JSON.stringify(bodyOrFd) : bodyOrFd };
@@ -534,7 +563,7 @@ async function startJob(endpoint, bodyOrFd, isJson, steps){
     if(r.status===402){ hideProgress(); toast('No credits — top up below','err'); goto('pricing'); return; }
     if(!r.ok){ const d=await r.json(); throw new Error(d.detail||'Server error'); }
     const {job_id}=await r.json();
-    poll(job_id, steps);
+    poll(job_id, steps, isCinematic);
   }catch(e){
     hideProgress();
     toast(e.message||'Cannot reach server — is the backend running?','err');
@@ -545,28 +574,50 @@ async function startJob(endpoint, bodyOrFd, isJson, steps){
 const STATUS_STEP = {
   generating_script:'script', generating_audio:'audio', generating_images:'images',
   generating_ai_motion:'motion', animating_avatar:'animate', planning_scenes:'plan',
-  generating_video_clips:'clips', rendering:'render'
+  generating_video_clips:'clips', rendering:'render',
+  cinematic_state:'cinematic_state', scene_intent:'scene_intent',
+  shot_planning:'shot_planning', render_execution_plan:'render_execution_plan',
+  mapping_to_renderer:'mapping_to_renderer'
 };
 
-function poll(jid, steps){
+function poll(jid, steps, isCinematic=false){
   if(pollTimer) clearInterval(pollTimer);
   pollTimer=setInterval(async()=>{
     try{
-      const r=await fetch(`${API}/generate/jobs/${jid}`);
+      const statusEndpoint = isCinematic ? `/api/cinematic/status/${jid}` : `/generate/jobs/${jid}`;
+      const r=await fetch(`${API}${statusEndpoint}`);
       const j=await r.json();
-      const stepKey=STATUS_STEP[j.status];
-      if(stepKey) activateStep(stepKey, steps);
-      setProgress(j.progress||0, j.status?.replace(/_/g,' ')||'Working…');
-      if(j.status_detail) document.getElementById('status-detail').textContent=j.status_detail;
-      if(j.status==='done'){
-        clearInterval(pollTimer);
-        setProgress(100,'Done!'); allDone(steps);
-        showResult(j.video_url, j.caption, j.cta);
-        refreshCreds();
-      }
-      if(j.status==='failed'){
-        clearInterval(pollTimer); hideProgress();
-        toast('Failed: '+(j.error||'unknown error'),'err'); refreshCreds();
+      
+      if(isCinematic){
+        const stepKey=STATUS_STEP[j.current_phase];
+        if(stepKey) activateStep(stepKey, steps);
+        setProgress(j.progress||0, j.current_phase?.replace(/_/g,' ')||'Working…');
+        if(j.logs && j.logs.length>0) document.getElementById('status-detail').textContent=j.logs[j.logs.length-1];
+        if(j.status==='done'){
+          clearInterval(pollTimer);
+          setProgress(100,'Done!'); allDone(steps);
+          showResult(j.video_url, '', '');
+          refreshCreds();
+        }
+        if(j.status==='failed'){
+          clearInterval(pollTimer); hideProgress();
+          toast('Failed: '+(j.error||'unknown error'),'err'); refreshCreds();
+        }
+      }else{
+        const stepKey=STATUS_STEP[j.status];
+        if(stepKey) activateStep(stepKey, steps);
+        setProgress(j.progress||0, j.status?.replace(/_/g,' ')||'Working…');
+        if(j.status_detail) document.getElementById('status-detail').textContent=j.status_detail;
+        if(j.status==='done'){
+          clearInterval(pollTimer);
+          setProgress(100,'Done!'); allDone(steps);
+          showResult(j.video_url, j.caption, j.cta);
+          refreshCreds();
+        }
+        if(j.status==='failed'){
+          clearInterval(pollTimer); hideProgress();
+          toast('Failed: '+(j.error||'unknown error'),'err'); refreshCreds();
+        }
       }
     }catch{}
   },2500);
@@ -578,7 +629,12 @@ const STEP_LABELS={
   images:'Creating scene images (FLUX.1)', motion:'AI motion clips (Wan2.1)',
   render:'Rendering video (FFmpeg)', face:'Generating AI face',
   animate:'Animating avatar (SadTalker)', plan:'Planning cinematic shots',
-  clips:'Generating AI video clips'
+  clips:'Generating AI video clips',
+  cinematic_state:'Initializing cinematic state graph',
+  scene_intent:'Generating scene intent sequence',
+  shot_planning:'Planning camera shots',
+  render_execution_plan:'Building render execution plan',
+  mapping_to_renderer:'Mapping to existing renderer'
 };
 
 function buildSteps(keys){ return keys; }

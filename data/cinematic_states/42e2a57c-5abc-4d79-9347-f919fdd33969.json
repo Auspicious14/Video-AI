@@ -1,0 +1,28 @@
+{
+  "story_id": "42e2a57c-5abc-4d79-9347-f919fdd33969",
+  "narrative_state": {
+    "current_sequence": "intro",
+    "current_scene_index": 0,
+    "tension": 0.1
+  },
+  "characters": {},
+  "environment": {
+    "location": "unknown",
+    "time_of_day": "day",
+    "audio_atmosphere": "neutral"
+  },
+  "emotion_state": {
+    "dominant_emotion": "neutral",
+    "intensity": 0.5
+  },
+  "continuity_memory": {
+    "locked_facts": [],
+    "last_scene_summary": "Start of the story"
+  },
+  "sequence_state": [],
+  "render_state": {
+    "fps": 30,
+    "aspect_ratio": "9:16",
+    "last_render_status": "pending"
+  }
+}

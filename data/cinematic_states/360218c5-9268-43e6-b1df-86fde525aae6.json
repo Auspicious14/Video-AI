@@ -1,0 +1,30 @@
+{
+  "story_id": "360218c5-9268-43e6-b1df-86fde525aae6",
+  "narrative_state": {
+    "current_sequence": "intro",
+    "current_scene_index": 1,
+    "tension": 0.2
+  },
+  "characters": {},
+  "environment": {
+    "location": "unknown",
+    "time_of_day": "day",
+    "audio_atmosphere": "neutral"
+  },
+  "emotion_state": {
+    "dominant_emotion": "educational",
+    "intensity": 0.6
+  },
+  "continuity_memory": {
+    "locked_facts": [
+      "Video generated for topic: Hook:\n\n“She didn’t think the headache meant danger.”\n\nBody:\n\nIt started small.\n\nJust headaches.\n\nThen swelling.\n\nThen blurry vision.\n\nPeople around her said:\n“It’s normal during pregnancy.”\n\nBut her blood pressure kept rising.\n\nQuietly.\n\nThat’s how pre-eclampsia can begin.\n\nNot always with pain.\n\nSometimes with signs people ignore.\n\nTracking your blood pressure daily can help catch problems early.\n\nThat’s why MaternAlert exists.\n\nCTA:\n\nKnow the signs early.\n\nCaption:\n\nSome pregnancy warning signs look harmless at first. 🤰🏾\n\n#PreEclampsia #PregnancyCare #MaternalHealth #Nigeria #MaternAlert"
+    ],
+    "last_scene_summary": "Some pregnancy warning signs look harmless at first. 🤰🏾\n#PreEclampsia #PregnancyCare #MaternalHealth #Nigeria #MaternAlert"
+  },
+  "sequence_state": [],
+  "render_state": {
+    "fps": 30,
+    "aspect_ratio": "9:16",
+    "last_render_status": "pending"
+  }
+}

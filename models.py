@@ -154,3 +154,21 @@ class AvatarVideoRequest(BaseModel):
     # PREMIUM: path to uploaded image (set by the router after saving the upload)
     # Frontend sends multipart/form-data; router saves the file and sets this.
     face_image_path: Optional[str] = None      # absolute path string on server
+
+
+# ── 7. Cinematic Generation ───────────────────────────────────────────────────
+class CinematicGenerateRequest(BaseModel):
+    topic: str
+    duration_sec: int = 45
+    tone: str = "emotionally grounded"
+    style: str = "cinematic realism"
+    user_email: str
+
+
+class CinematicJobStatus(BaseModel):
+    job_id: str
+    status: str
+    progress: int
+    current_phase: Optional[str] = None
+    logs: list = []
+    video_url: Optional[str] = None

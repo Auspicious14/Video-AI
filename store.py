@@ -53,6 +53,8 @@ def create_job(job_id: str) -> None:
         "error":         None,
         "progress":      0,         # 0–100
         "status_detail": None,      # human-readable step description
+        "current_phase": None,      # cinematic pipeline phase
+        "logs":          [],        # cinematic pipeline logs
     }
 
 
