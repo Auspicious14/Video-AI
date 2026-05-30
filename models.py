@@ -26,6 +26,7 @@ class TikTokRequest(BaseModel):
     duration: int = 30              # 15 | 30 | 60
     brand_name: Optional[str] = None
     voice_id: str = "21m00Tcm4TlvDq8ikWAM"
+    health_awareness: bool = False
 
 
 # ── 2. Still Image → Motion ───────────────────────────────────────────────────
@@ -57,6 +58,7 @@ class HybridVideoRequest(BaseModel):
     duration: int = 30                  # 15 | 30 | 60
     brand_name: Optional[str] = None
     voice_id: str = "21m00Tcm4TlvDq8ikWAM"
+    health_awareness: bool = False
 
     # Layer C controls
     use_ai_motion: bool = False         # set True to attempt AI video clips
@@ -147,6 +149,7 @@ class AvatarVideoRequest(BaseModel):
     duration: int = 30
     brand_name: Optional[str] = None
     voice_id: str = "21m00Tcm4TlvDq8ikWAM"
+    health_awareness: bool = False
 
     # FREE: choose an AI-generated face style
     avatar_style: Literal["doctor", "presenter", "friend"] = "doctor"

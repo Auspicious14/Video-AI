@@ -223,6 +223,7 @@ footer em{color:var(--accent);font-style:normal}
         <div class="fg full">
           <div class="trow"><div class="trow-info"><strong>🎬 AI Motion Clips</strong><span>Wan2.1 per scene — slower, more cinematic</span></div><label class="tog"><input type="checkbox" id="h-motion"/><div class="tk"></div></label></div>
           <div class="trow"><div class="trow-info"><strong>💬 Subtitle Cards</strong><span>Burn word-by-word subtitles into video</span></div><label class="tog"><input type="checkbox" id="h-subs" checked/><div class="tk"></div></label></div>
+          <div class="trow"><div class="trow-info"><strong>🩺 Health Awareness Mode</strong><span>Optimized for medical/health content</span></div><label class="tog"><input type="checkbox" id="h-health"/><div class="tk"></div></label></div>
         </div>
       </div>
       <div class="gen-row"><div class="cost-note">Costs <strong>1 credit</strong></div><button class="btn btn-p btn-lg" onclick="gen('hybrid')">Generate →</button></div>
@@ -236,6 +237,9 @@ footer em{color:var(--accent);font-style:normal}
         <div class="fg"><label>Duration</label><div class="chips" id="t-durs"><div class="chip" onclick="chip(this,'t-durs')">15s</div><div class="chip on" onclick="chip(this,'t-durs')">30s</div><div class="chip" onclick="chip(this,'t-durs')">60s</div></div></div>
         <div class="fg"><label>Brand name</label><input id="t-brand" type="text" placeholder="Optional"/></div>
         <div class="fg full"><label>Your email</label><input id="t-email" type="email" placeholder="you@example.com"/></div>
+        <div class="fg full">
+          <div class="trow"><div class="trow-info"><strong>🩺 Health Awareness Mode</strong><span>Optimized for medical/health content</span></div><label class="tog"><input type="checkbox" id="t-health"/><div class="tk"></div></label></div>
+        </div>
       </div>
       <div class="gen-row"><div class="cost-note">Costs <strong>1 credit</strong></div><button class="btn btn-p btn-lg" onclick="gen('tiktok')">Generate →</button></div>
     </div>
@@ -291,6 +295,9 @@ footer em{color:var(--accent);font-style:normal}
         <div class="fg"><label>Duration</label><div class="chips" id="af-durs"><div class="chip" onclick="chip(this,'af-durs')">15s</div><div class="chip on" onclick="chip(this,'af-durs')">30s</div><div class="chip" onclick="chip(this,'af-durs')">60s</div></div></div>
         <div class="fg"><label>Brand name</label><input id="af-brand" type="text" placeholder="Optional"/></div>
         <div class="fg full"><label>Your email</label><input id="af-email" type="email" placeholder="you@example.com"/></div>
+        <div class="fg full">
+          <div class="trow"><div class="trow-info"><strong>🩺 Health Awareness Mode</strong><span>Optimized for medical/health content</span></div><label class="tog"><input type="checkbox" id="af-health"/><div class="tk"></div></label></div>
+        </div>
       </div>
       <p style="font-size:12px;color:var(--muted);margin-bottom:0">AI generates a face, then SadTalker lip-syncs it to your script. Falls back to hybrid if unavailable.</p>
       <div class="gen-row"><div class="cost-note">Costs <strong>1 credit</strong></div><button class="btn btn-p btn-lg" onclick="gen('avatar')">Generate →</button></div>
@@ -314,6 +321,9 @@ footer em{color:var(--accent);font-style:normal}
         <div class="fg"><label>Duration</label><div class="chips" id="ap-durs"><div class="chip" onclick="chip(this,'ap-durs')">15s</div><div class="chip on" onclick="chip(this,'ap-durs')">30s</div><div class="chip" onclick="chip(this,'ap-durs')">60s</div></div></div>
         <div class="fg"><label>Brand name</label><input id="ap-brand" type="text" placeholder="Optional"/></div>
         <div class="fg full"><label>Your email</label><input id="ap-email" type="email" placeholder="you@example.com"/></div>
+        <div class="fg full">
+          <div class="trow"><div class="trow-info"><strong>🩺 Health Awareness Mode</strong><span>Optimized for medical/health content</span></div><label class="tog"><input type="checkbox" id="ap-health"/><div class="tk"></div></label></div>
+        </div>
       </div>
       <p style="font-size:12px;color:var(--muted);margin-bottom:0">Your photo is animated with SadTalker lip-sync. <strong style="color:var(--accent)">Premium — 2 credits.</strong></p>
       <div class="gen-row"><div class="cost-note">Costs <strong>2 credits</strong></div><button class="btn btn-p btn-lg" onclick="gen('avatar_premium')">Generate →</button></div>
@@ -457,7 +467,8 @@ async function doHybrid(){
   const body={ user_email:email, topic, tone:getChip('h-tones')||'educational',
     duration:durVal('h-durs'), brand_name:val('h-brand')||null,
     use_ai_motion:document.getElementById('h-motion').checked,
-    subtitles:document.getElementById('h-subs').checked };
+    subtitles:document.getElementById('h-subs').checked,
+    health_awareness:document.getElementById('h-health').checked };
   startJob('/generate/hybrid', body, true, buildSteps(['script','audio','images','render'],'hybrid'));
 }
 
@@ -467,7 +478,8 @@ async function doTiktok(){
   if(!topic) return toast('Describe your video topic','err');
   saveUser(email);
   const body={ user_email:email, topic, tone:getChip('t-tones')||'educational',
-    duration:durVal('t-durs'), brand_name:val('t-brand')||null };
+    duration:durVal('t-durs'), brand_name:val('t-brand')||null,
+    health_awareness:document.getElementById('t-health').checked };
   startJob('/generate/tiktok', body, true, buildSteps(['script','audio','images','render'],'tiktok'));
 }
 
@@ -502,7 +514,8 @@ async function doAvatar(){
   if(!topic) return toast('Describe your video topic','err');
   saveUser(email);
   const body={ user_email:email, topic, tone:getChip('af-tones')||'educational',
-    duration:durVal('af-durs'), brand_name:val('af-brand')||null, avatar_style:avStyleSelected };
+    duration:durVal('af-durs'), brand_name:val('af-brand')||null, avatar_style:avStyleSelected,
+    health_awareness:document.getElementById('af-health').checked };
   startJob('/generate/avatar', body, true, buildSteps(['script','audio','face','animate','render'],'avatar'));
 }
 
@@ -520,6 +533,7 @@ async function doAvatarPremium(){
   fd.append('duration',durVal('ap-durs'));
   fd.append('brand_name',val('ap-brand')||'');
   fd.append('avatar_style',avStyleSelected);
+  fd.append('health_awareness', document.getElementById('ap-health').checked ? 'true' : 'false');
   fd.append('face_image',file);
   startJob('/generate/avatar/premium', fd, false, buildSteps(['script','audio','animate','render'],'avatar_premium'));
 }

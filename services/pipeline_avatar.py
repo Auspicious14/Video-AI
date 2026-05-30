@@ -164,8 +164,9 @@ async def _generate_avatar_script(req: AvatarVideoRequest) -> dict:
         duration=req.duration,
         brand_name=req.brand_name,
         voice_id=req.voice_id,
+        health_awareness=req.health_awareness,
     )
-    return await generate_script(tiktok_req)
+    return await generate_script(tiktok_req, req.health_awareness)
 
 
 def _build_avatar_topic(req: AvatarVideoRequest) -> str:

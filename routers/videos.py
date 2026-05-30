@@ -331,6 +331,7 @@ async def generate_avatar_premium(
     duration: int           = Form(30),
     brand_name: Optional[str] = Form(None),
     avatar_style: str       = Form("friend"),   # style hint even with own photo
+    health_awareness: bool  = Form(False),
     # File upload
     face_image: UploadFile  = File(...),
 ):
@@ -380,6 +381,7 @@ async def generate_avatar_premium(
         duration=duration,
         brand_name=brand_name,
         avatar_style=avatar_style,
+        health_awareness=health_awareness,
         face_image_path=str(face_path),
     )
 

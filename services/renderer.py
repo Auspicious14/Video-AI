@@ -32,15 +32,15 @@ from config import OUTPUT_DIR
 
 # ─── Master constants ─────────────────────────────────────────────────────────
 FPS    = 30          # LOCKED — never change per-call, use this everywhere
-W      = 576         # output width  (9:16 portrait)
-H      = 1024        # output height
+W      = 1080        # output width  (9:16 portrait for TikTok)
+H      = 1920        # output height
 SCALE  = 2           # overscan for zoompan (2× avoids black edges)
-SW     = W * SCALE   # 1152
-SH     = H * SCALE   # 2048
+SW     = W * SCALE   # 2160
+SH     = H * SCALE   # 3840
 # Max zoom factor (1.5 = 50% zoom-in).  Keep ≤1.5 for quality.
 MAX_Z  = 1.5
 # Zoom step per frame — tiny value is key to eliminating jitter
-ZOOM_STEP = 0.0006
+ZOOM_STEP = 0.0007
 
 
 # ─── Motion effect presets (deterministic, no randomness) ────────────────────
@@ -53,7 +53,7 @@ def _zoom_in(duration: float, fps: int = FPS) -> str:
     return (
         f"scale={SW}:{SH},"
         f"zoompan="
-        f"z='min(1+on*{ZOOM_STEP:.4f},{MAX_Z})':"
+        f"z='if(lte(on,1),1,zoom+{ZOOM_STEP:.4f})':"
         f"x='trunc(iw/2-(iw/zoom/2))':"
         f"y='trunc(ih/2-(ih/zoom/2))':"
         f"d={d}:fps={fps}:s={W}x{H}"
@@ -129,6 +129,36 @@ def _tilt_down(duration: float, fps: int = FPS) -> str:
     )
 
 
+def _diagonal_pan_right_up(duration: float, fps: int = FPS) -> str:
+    """Diagonal pan right-up at fixed 1.2× zoom."""
+    d = max(1, int(duration * fps))
+    travel_x = f"(iw-iw/1.2)"
+    travel_y = f"(ih-ih/1.2)"
+    return (
+        f"scale={SW}:{SH},"
+        f"zoompan="
+        f"z='1.2':"
+        f"x='trunc({travel_x}*(on-1)/({d}-1))':"
+        f"y='trunc({travel_y}*(1-(on-1)/({d}-1)))':"
+        f"d={d}:fps={fps}:s={W}x{H}"
+    )
+
+
+def _diagonal_pan_left_down(duration: float, fps: int = FPS) -> str:
+    """Diagonal pan left-down at fixed 1.2× zoom."""
+    d = max(1, int(duration * fps))
+    travel_x = f"(iw-iw/1.2)"
+    travel_y = f"(ih-ih/1.2)"
+    return (
+        f"scale={SW}:{SH},"
+        f"zoompan="
+        f"z='1.2':"
+        f"x='trunc({travel_x}*(1-(on-1)/({d}-1)))':"
+        f"y='trunc({travel_y}*(on-1)/({d}-1))':"
+        f"d={d}:fps={fps}:s={W}x{H}"
+    )
+
+
 def _static(duration: float, fps: int = FPS) -> str:
     """Static frame — no motion at all (guaranteed stable)."""
     d = max(1, int(duration * fps))
@@ -144,30 +174,39 @@ def _static(duration: float, fps: int = FPS) -> str:
 
 # Ordered list — index is used for DETERMINISTIC selection (no random)
 MOTION_EFFECTS: List = [
-    _zoom_in,    # 0
-    _zoom_out,   # 1
-    _pan_right,  # 2
-    _pan_left,   # 3
-    _tilt_up,    # 4
-    _tilt_down,  # 5
-    _static,     # 6  — fall-back for scenes where motion would look bad
+    _zoom_in,              # 0
+    _zoom_out,             # 1
+    _pan_right,            # 2
+    _pan_left,             # 3
+    _tilt_up,              # 4
+    _tilt_down,            # 5
+    _diagonal_pan_right_up,# 6
+    _diagonal_pan_left_down,#7
+    _static,               #8  — fall-back for scenes where motion would look bad
 ]
 
 # Effect name → function map (for StillToMotion / API requests)
 EFFECT_MAP = {fn.__name__.lstrip("_"): fn for fn in MOTION_EFFECTS}
-# keys: zoom_in, zoom_out, pan_right, pan_left, tilt_up, tilt_down, static
+
+# Emotion to effect mapping
+EMOTION_EFFECT_MAP = {
+    'urgent': _zoom_in,
+    'hopeful': _zoom_out,
+    'informative': _pan_right,
+    'empathetic': _zoom_in,
+    'inspiring': _diagonal_pan_right_up
+}
+
 
 
 # ─── Transition presets ───────────────────────────────────────────────────────
 TRANSITIONS = [
-    "fade", "fadeblack", "fadewhite",
-    "slideleft", "slideright", "slideup", "slidedown",
-    "smoothleft", "smoothright",
-    "dissolve",
+    "fade",
 ]
-# Deterministic transition selection: cycle through by scene index
+# Deterministic transition selection: always use smooth crossfade (duration=0.4)
 def _pick_transition(scene_index: int) -> str:
-    return TRANSITIONS[scene_index % len(TRANSITIONS)]
+    return "fade"
+
 
 
 # ─── Font loader ──────────────────────────────────────────────────────────────
@@ -195,7 +234,7 @@ def create_text_overlay(
     font_size: int = 38,
     width: int = W,
     height: int = H,
-    y_pos: int = 80,
+    y_pos: int = None,
     color: tuple = (255, 255, 255, 255),
     box_color: tuple = (0, 0, 0, 160),
     max_width_fraction: float = 0.88,
@@ -205,6 +244,8 @@ def create_text_overlay(
     draw = ImageDraw.Draw(img)
     font = _find_font(font_size)
     max_w = int(width * max_width_fraction)
+    if y_pos is None:
+        y_pos = int(height * 0.75)
 
     words, lines, current = text.split(), [], []
     for word in words:
@@ -339,7 +380,8 @@ def build_scene_clip(
         "-pix_fmt", "yuv420p",
         "-r", str(fps),           # output framerate — must match fps= in zoompan
         "-c:v", "libx264",
-        "-preset", "fast",
+        "-preset", "slow",
+        "-crf", "18",
         str(output_path),
     ], capture_output=True)
 
@@ -364,7 +406,8 @@ def _normalize_clip(
         "-r", str(fps),
         "-pix_fmt", "yuv420p",
         "-c:v", "libx264",
-        "-preset", "fast",
+        "-preset", "slow",
+        "-crf", "18",
         str(dst),
     ], capture_output=True)
     if result.returncode != 0:
@@ -384,8 +427,9 @@ def build_final_video(
     output_path: Path,
     tmp: Path,
     fps: int = FPS,
-    transition_duration: float = 0.5,
+    transition_duration: float = 0.4,
     subtitle_lines: Optional[List[Tuple[str, float, float]]] = None,
+    bgm_path: Optional[Path] = None,
 ) -> Path:
     """
     Full deterministic composition:
@@ -427,7 +471,8 @@ def build_final_video(
         f"[v1][2:v]overlay=enable='between(t,{cta_start:.3f},{actual_duration:.3f})'[vout]",
         "-map", "[vout]",
         "-c:v", "libx264",
-        "-preset", "fast",
+        "-preset", "slow",
+        "-crf", "18",
         "-pix_fmt", "yuv420p",
         "-r", str(fps),
         str(overlaid),
@@ -447,16 +492,31 @@ def build_final_video(
         )
 
     # 4. Audio mux
-    result = subprocess.run([
-        "ffmpeg", "-y",
-        "-i", str(subtitled),
-        "-i", str(audio_path),
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-shortest",
-        str(output_path),
-    ], capture_output=True)
+    cmd = ["ffmpeg", "-y", "-i", str(subtitled), "-i", str(audio_path)]
+    filter_parts = []
+    if bgm_path and bgm_path.exists() and bgm_path.stat().st_size > 100:
+        cmd += ["-i", str(bgm_path)]
+        filter_parts.append("[1:a]volume=1.0[a1];[2:a]volume=-18dB[a2];[a1][a2]amix=inputs=2:duration=first:dropout_transition=2[aout]")
+        a_input = "[aout]"
+    else:
+        filter_parts.append("[1:a]anull[aout]")
+        a_input = "[aout]"
+    filter_parts.append(f"{a_input}loudnorm=I=-16:TP=-1.5:LRA=11[a_norm]")
+    filter_complex = ";".join(filter_parts)
+
+    result = subprocess.run(
+        cmd + [
+            "-filter_complex", filter_complex,
+            "-map", "0:v",
+            "-map", "[a_norm]",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-shortest",
+            str(output_path),
+        ],
+        capture_output=True,
+    )
 
     if result.returncode != 0:
         raise ValueError(
@@ -476,6 +536,7 @@ async def render_video(
     actual_duration: float,
     ai_clip_paths: Optional[List[Optional[Path]]] = None,  # Layer C clips
     subtitle_lines: Optional[List[Tuple[str, float, float]]] = None,
+    bgm_path: Optional[Path] = None,
 ) -> Path:
     """
     Main render entry-point for the hybrid pipeline.
@@ -522,8 +583,9 @@ async def render_video(
             output_path=output_path,
             tmp=tmp,
             fps=fps,
-            transition_duration=0.5,
+            transition_duration=0.4,
             subtitle_lines=subtitle_lines,
+            bgm_path=bgm_path,
         )
 
     return output_path
@@ -612,7 +674,8 @@ def _chain_with_transitions(
         "-pix_fmt", "yuv420p",
         "-r", str(fps),
         "-c:v", "libx264",
-        "-preset", "fast",
+        "-preset", "slow",
+        "-crf", "18",
         str(output_path),
     ]
 
@@ -643,6 +706,8 @@ def _chain_with_concat(
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
         "-r", str(fps),
+        "-preset", "slow",
+        "-crf", "18",
         str(output_path),
     ], capture_output=True)
 

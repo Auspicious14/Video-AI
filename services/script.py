@@ -6,7 +6,7 @@ from models import TikTokRequest
 gemini = genai.Client(api_key=GEMINI_API_KEY)
 
 
-async def generate_script(req: TikTokRequest) -> dict:
+async def generate_script(req: TikTokRequest, health_awareness: bool = False) -> dict:
     brand_line = (
         f"Mention the brand/app name naturally: {req.brand_name}."
         if req.brand_name
@@ -15,9 +15,21 @@ async def generate_script(req: TikTokRequest) -> dict:
 
     scene_count = max(4, req.duration // 5)
     avg_scene_duration = round(req.duration / scene_count, 1)
-
-    # More natural pacing
     word_target = int(req.duration * 2.1)
+
+    health_context = """
+══════════════════════════════════════
+HEALTH AWARENESS MODE
+══════════════════════════════════════
+This is a health awareness campaign video. Additional rules:
+- Use empathetic, non-alarming language
+- Show diverse Nigerian/African women of different ages
+- Avoid medical jargon — use everyday language
+- Never show graphic medical imagery
+- End with ONE clear, calm action step (e.g. "Download MaternAlert")
+- Image prompts must show real everyday settings, not clinical stock imagery
+- Emotional tone should be: concerned but hopeful, never fearful
+""" if health_awareness else ""
 
     prompt = f"""
 You are an expert short-form filmmaker and emotionally intelligent TikTok scriptwriter.
@@ -43,13 +55,13 @@ WRITING STYLE RULES
 
 - Write like a real human speaking naturally.
 - The narration must sound emotionally grounded and believable.
-- Avoid robotic “viral TikTok” pacing.
+- Avoid robotic "viral TikTok" pacing.
 - Avoid exaggerated hype language.
 - Avoid fake motivation-speech energy.
 - Vary sentence lengths naturally.
 - Some sentences can be short for emphasis.
 - Others can breathe naturally.
-- Prioritize emotional realism over “virality tricks”.
+- Prioritize emotional realism over "virality tricks".
 
 The narration should feel like:
 - a real observation
@@ -142,28 +154,56 @@ SCENE RULES
 
 Create EXACTLY {scene_count} scenes.
 
-Each scene duration:
-{avg_scene_duration} seconds
+Each scene duration: {avg_scene_duration} seconds
 
-Each scene description must include:
-- camera framing
-- subject behavior
-- subtle movement
-- environment
-- lighting
-- emotional tone
+Each scene must include these fields:
 
-Scenes should feel like:
-"a real camera crew captured this moment"
+1. description:
+   A detailed cinematic scene description including:
+   - camera framing
+   - subject behavior
+   - subtle movement
+   - environment
+   - lighting
+   - emotional tone
 
-NOT:
-"an overproduced AI commercial"
+   Scenes should feel like "a real camera crew captured this moment",
+   NOT "an overproduced AI commercial".
 
-Good example:
-"Medium shot of a pregnant Nigerian woman sitting quietly on her bed at night, rubbing her forehead while checking her blood pressure monitor, warm bedside lighting, subtle camera drift, emotionally tense but realistic."
+   Good example:
+   "Medium shot of a pregnant Nigerian woman sitting quietly on her bed at night,
+   rubbing her forehead while checking her blood pressure monitor, warm bedside
+   lighting, subtle camera drift, emotionally tense but realistic."
 
-Bad example:
-"Woman using phone."
+   Bad example:
+   "Woman using phone."
+
+2. image_prompt:
+   A self-contained visual prompt for AI image generation.
+
+   Format strictly as:
+   "[Subject and action], [environment], [lighting], [camera angle], [mood], photorealistic, cinematic, 4K"
+
+   Rules for image_prompt:
+   - Must be fully self-contained — describe the subject completely, no pronouns
+   - Never use "she", "her", "he", "his", "they" — always name the subject
+   - Never reference text overlays, captions, UI elements, or phone screens
+   - Never describe abstract concepts — only what a camera would physically see
+   - Always include Nigerian/African subject description unless stated otherwise
+   - Always specify modest clothing for pregnant women
+   - Include skin tone naturally (e.g. "dark-skinned Nigerian woman", "medium brown skin")
+
+   Good example:
+   "Pregnant dark-skinned Nigerian woman in a loose cotton wrapper sitting on a
+   wooden bed at night, checking a blood pressure monitor, warm amber bedside lamp,
+   medium close-up, emotionally quiet and tense atmosphere, photorealistic, cinematic, 4K"
+
+   Bad example:
+   "She is checking her phone. Dramatic lighting."
+
+3. emotion:
+   The dominant emotional tone of this scene.
+   Must be exactly one of: urgent | hopeful | informative | empathetic | inspiring
 
 Scene pacing:
 - avoid excessive motion
@@ -186,25 +226,29 @@ Requirements:
 - no excessive emojis
 - no clickbait wording
 
+{health_context}
+
 ══════════════════════════════════════
 RETURN FORMAT
 ══════════════════════════════════════
 
-Return ONLY valid JSON.
+Return ONLY valid JSON. No markdown. No code blocks. No extra text.
 
 Schema:
 
 {{
   "hook": "Short emotionally strong opening line",
-  "narration": "Full spoken narration only",
+  "narration": "Full spoken narration only — no stage directions, no emojis, no hashtags",
   "scenes": [
     {{
-      "description": "Detailed realistic cinematic scene",
+      "description": "Detailed realistic cinematic scene description",
+      "image_prompt": "Self-contained AI image generation prompt following the format above",
+      "emotion": "one of: urgent | hopeful | informative | empathetic | inspiring",
       "duration": {avg_scene_duration}
     }}
   ],
-  "caption": "TikTok caption with hashtags",
-  "cta": "Short calm CTA"
+  "caption": "TikTok caption text with 3–5 hashtags",
+  "cta": "Short calm call-to-action"
 }}
 """
 
@@ -223,25 +267,32 @@ Schema:
 
         parsed = json.loads(response.text)
 
-        # Basic structural validation
-        required_fields = [
-            "hook",
-            "narration",
-            "scenes",
-            "caption",
-            "cta",
-        ]
-
+        # Validate top-level fields
+        required_fields = ["hook", "narration", "scenes", "caption", "cta"]
         for field in required_fields:
             if field not in parsed:
                 raise ValueError(f"Missing required field: {field}")
 
+        # Validate scene count
         if len(parsed["scenes"]) != scene_count:
             raise ValueError(
                 f"Expected {scene_count} scenes, got {len(parsed['scenes'])}"
             )
 
+        # Validate each scene's fields
+        valid_emotions = {"urgent", "hopeful", "informative", "empathetic", "inspiring"}
+        for i, scene in enumerate(parsed["scenes"]):
+            for scene_field in ["description", "image_prompt", "emotion", "duration"]:
+                if scene_field not in scene:
+                    raise ValueError(f"Scene {i + 1} missing field: '{scene_field}'")
+
+            if scene["emotion"] not in valid_emotions:
+                # Coerce invalid emotion to 'informative' rather than failing hard
+                parsed["scenes"][i]["emotion"] = "informative"
+
         return parsed
 
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Gemini returned invalid JSON: {e}")
     except Exception as e:
         raise ValueError(f"Script generation failed: {e}")

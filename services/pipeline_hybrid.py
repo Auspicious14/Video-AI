@@ -44,15 +44,15 @@ async def run_hybrid_pipeline(job_id: str, req: HybridVideoRequest) -> None:
     """
     Full end-to-end hybrid pipeline:
       1. Script generation (Gemini)
-      2. Audio generation (gTTS / ElevenLabs)
-      3. Image generation (FLUX.1-schnell via HF)
+      2. Audio generation (Kokoro TTS / gTTS )
+      3. Image generation (Fal.ai / FLUX.1-schnell via HF)
       4. AI motion clips (Wan2.1 / SVD) — concurrent, non-blocking
       5. Deterministic video composition (FFmpeg)
     """
     try:
         # ── 1. Script ─────────────────────────────────────────────────────────
         store.update_job(job_id, status="generating_script", progress=5)
-        script = await generate_script_for_hybrid(req)
+        script = await generate_script(req, req.health_awareness)
         store.update_job(
             job_id,
             caption=script.get("caption"),
@@ -143,9 +143,10 @@ async def generate_script_for_hybrid(req: HybridVideoRequest) -> dict:
         duration=req.duration,
         brand_name=req.brand_name,
         voice_id=req.voice_id,
+        health_awareness=req.health_awareness,
     )
     from services.script import generate_script
-    return await generate_script(tiktok_req)
+    return await generate_script(tiktok_req, req.health_awareness)
 
 
 # ─── Subtitle builder ─────────────────────────────────────────────────────────

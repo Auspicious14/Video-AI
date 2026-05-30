@@ -1,22 +1,28 @@
 # ── Core web framework ────────────────────────────────────────────────────────
-fastapi==0.111.0
-uvicorn[standard]==0.30.1
-python-multipart==0.0.9       # multipart/form-data for image upload
-pydantic==2.7.1
-python-dotenv==1.0.1
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+pydantic>=2.10.0
+python-dotenv>=1.0.0
 
 # ── HTTP clients ──────────────────────────────────────────────────────────────
-httpx==0.27.0                  # async HTTP (HuggingFace AI video API calls)
+httpx>=0.27.0                  # async HTTP (HuggingFace AI video API calls)
 aiohttp                        # required by AsyncInferenceClient
 
 # ── AI — Script generation ────────────────────────────────────────────────────
 google-genai
 # ── AI — Image generation ──────────────────────────────────────────────────────
-huggingface_hub==0.30.1        # AsyncInferenceClient: FLUX.1-schnell images
-Pillow==10.3.0                 # PIL — text overlays, JPEG conversion
+huggingface_hub>=0.30.0        # AsyncInferenceClient: FLUX.1-schnell images (fallback)
+fal-client                      # fal.ai API for FLUX.1-dev (primary)
+Pillow>=11.0.0                 # PIL — text overlays, JPEG conversion (supports Python 3.14)
+requests                        # For downloading images from fal.ai
 
 # ── AI — Audio / TTS ─────────────────────────────────────────────────────────
-gTTS==2.5.1                    # free text-to-speech (no key needed)
+gTTS>=2.5.0                     # free text-to-speech (fallback)
+pykokoro>=0.6.0                 # high-quality TTS (supports Python 3.10-3.13)
+soundfile                       # WAV file handling
+numpy                           # array operations for audio
+torch                           # required for pykokoro (optional but recommended
 # elevenlabs==1.50.6           # premium TTS — uncomment when upgrading
 
 # ── Video rendering ───────────────────────────────────────────────────────────

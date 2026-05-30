@@ -19,7 +19,7 @@ async def run_tiktok_pipeline(job_id: str, req: TikTokRequest) -> None:
     try:
         # 1. Generate script
         store.update_job(job_id, status="generating_script", progress=5)
-        script = await generate_script(req)
+        script = await generate_script(req, req.health_awareness)
         store.update_job(
             job_id,
             caption=script.get("caption"),
