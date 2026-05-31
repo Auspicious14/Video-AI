@@ -9,6 +9,7 @@ GEMINI_API_KEY     = os.getenv("GEMINI_API_KEY", "")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")   # optional — leave blank for gTTS
 HF_API_KEY         = os.getenv("HF_API_KEY", "")            # free token: huggingface.co/settings/tokens
 FAL_KEY            = os.getenv("FAL_KEY", "")               # fal.ai API key for FLUX.1-dev
+PIXAZO_API_KEY     = os.getenv("PIXAZO_API_KEY", "")       # pixazo API key for FLUX.1-schnell
 
 # ── Payments ──────────────────────────────────────────────────────────────────
 PAYSTACK_SECRET_KEY   = os.getenv("PAYSTACK_SECRET_KEY", "")
