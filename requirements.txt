@@ -10,7 +10,9 @@ httpx>=0.27.0                  # async HTTP (HuggingFace AI video API calls)
 aiohttp                        # required by AsyncInferenceClient
 
 # ── AI — Script generation ────────────────────────────────────────────────────
-google-genai
+google-genai                   # Gemini SDK (fallback provider + vision)
+openai>=1.30.0                 # OpenAI-compatible SDK — used for Groq (primary provider)
+python-json-logger>=2.0.7      # Structured JSON logging for the AI layer
 # ── AI — Image generation ──────────────────────────────────────────────────────
 huggingface_hub>=0.30.0        # AsyncInferenceClient: FLUX.1-schnell images (fallback)
 fal-client                      # fal.ai API for FLUX.1-dev (primary)
@@ -31,3 +33,4 @@ torch                           # required for pykokoro (optional but recommende
 #   Ubuntu: apt install ffmpeg
 # No Python package needed — called via subprocess.
 gradio_client>=0.9.0 # SadTalker + LatentSync HF Spaces caller
+requests

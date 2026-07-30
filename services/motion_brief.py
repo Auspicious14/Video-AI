@@ -1,161 +1,69 @@
 """
-services/motion_brief.py
+services/motion_brief.py — Motion Brief Generator (refactored)
 
 Generates a structured DesignBrief JSON from:
   - A text topic/prompt (sourceType: "prompt")
   - A flyer image uploaded by the user (sourceType: "flyer")
 
 The brief is the single contract between Python and Remotion.
-Gemini writes everything the templates need: colors, text, stats, list items.
+
+Refactored to use the new AI layer:
+  - generate_json() in client.py handles Groq → Gemini failover.
+  - The prompt lives in services/ai/prompts/motion_brief.md.
+  - DesignBrief schema validates the output.
+
+Flyer image generation still uses the Gemini SDK directly because
+the OpenAI-compatible endpoint does not support inline image inputs.
 """
 
-import json
+from __future__ import annotations
+
 import base64
-import re
+import logging
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional
 
-from google import genai
-from config import GEMINI_API_KEY
+from services.ai.client import generate_json
+from services.ai.exceptions import ValidationError
+from services.ai.prompts import load_prompt
+from services.ai.schemas import DesignBrief
 
-
-# ── Client Setup ──────────────────────────────────────────────────────────────
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-2.5-flash"
+logger = logging.getLogger(__name__)
 
 
-# ── Prompt templates ───────────────────────────────────────────────────────────
+# ── Remotion Mapping ───────────────────────────────────────────────────────────
 
-_BRIEF_SYSTEM = """
-You are a motion design director for VideoAI.ng, a Nigerian video SaaS.
-Your job is to generate a structured DesignBrief JSON for a Remotion video template.
-
-Return ONLY valid JSON. No markdown, no backticks, no explanation. Pure JSON object.
-
-The JSON must exactly match this TypeScript type:
-
-interface StatItem {
-  label: string;
-  value: string;
-  suffix?: string;
-  prefix?: string;
-  numericValue: number;
+STYLE_TO_COMPOSITION = {
+    "minimal":       "MinimalVideo",
+    "bold":          "BoldVideo",
+    "glassmorphism": "GlassmorphismVideo",
+    "neon":          "NeonVideo",
 }
 
-interface ListItem {
-  index: number;
-  headline: string;
-  body?: string;
-  emoji?: string;
-}
 
-interface DesignBrief {
-  style: "minimal" | "bold" | "glassmorphism" | "neon";
-  aspectRatio: "9:16" | "16:9" | "1:1";
-  durationSeconds: number;
-  brandName?: string;
-  brandColor: string;
-  accentColor: string;
-  bgColor: string;
-  textColor: string;
-  title: string;
-  subtitle?: string;
-  bodyText?: string;
-  tagline?: string;
-  cta?: string;
-  stats?: StatItem[];
-  listItems?: ListItem[];
-  animationSpeed: "slow" | "normal" | "fast";
-  fontPairing: "syne_dmsans" | "inter" | "playfair_inter";
-  sourceType: "prompt" | "flyer";
-  flyerDescription?: string;
-}
-
-Rules:
-- brandColor and accentColor must be contrasting, vivid hex codes
-- bgColor must be very dark (near black) for "neon" and "glassmorphism" styles
-- bgColor can be white or light for "minimal"
-- textColor must contrast well against bgColor
-- For "glassmorphism": always include 2–4 stats items with realistic numericValue
-- For "neon": always include 3–5 listItems
-- For "bold": always include tagline
-- For "minimal": always include bodyText
-- title should be punchy (max 7 words)
-- durationSeconds: 10–25 depending on complexity
-- fontPairing: use "syne_dmsans" for Nigerian brands
-- animationSpeed: fast for TikTok, normal for brand, slow for luxury
-"""
-
-_PROMPT_USER_TEMPLATE = """
-Topic: {topic}
-Style requested: {style}
-Aspect ratio: {aspect_ratio}
-Brand name: {brand_name}
-Brand color hint: {brand_color}
-Duration: {duration} seconds
-
-Generate a DesignBrief JSON.
-"""
-
-_FLYER_USER_TEMPLATE = """
-The user uploaded a flyer to animate.
-
-Style requested: {style}
-Aspect ratio: {aspect_ratio}
-Duration: {duration} seconds
-
-1. Extract text, brand, colors, numbers
-2. Summarize in flyerDescription
-3. Map everything into DesignBrief JSON
-4. Choose best style
-
-Generate the DesignBrief JSON.
-"""
-
-
-# ── Core Gemini Wrapper (IMPORTANT) ────────────────────────────────────────────
-
-async def _generate_with_gemini(contents: list[Any], temperature: float) -> str:
-    """
-    Unified Gemini call wrapper (safer + reusable).
-    """
-    response = await client.models.generate_content_async(
-        model=MODEL_NAME,
-        contents=contents,
-        generation_config={
-            "temperature": temperature,
-            "max_output_tokens": 1500,
-        },
-    )
-
-    return _extract_text(response)
-
-
-def _extract_text(response: Any) -> str:
-    """
-    Safely extract text from Gemini response.
-    """
-    if hasattr(response, "text") and response.text:
-        return response.text
-
-    try:
-        return response.candidates[0].content.parts[0].text
-    except Exception:
-        raise ValueError("Failed to extract text from Gemini response")
+def brief_to_composition_id(brief: dict) -> str:
+    return STYLE_TO_COMPOSITION.get(brief.get("style", "minimal"), "MinimalVideo")
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 async def generate_brief_from_topic(
-    topic: str,
-    style: str,
+    topic:       str,
+    style:       str,
     aspect_ratio: str,
-    duration: int,
-    brand_name: Optional[str],
+    duration:    int,
+    brand_name:  Optional[str],
     brand_color: Optional[str],
 ) -> dict:
-    prompt = _PROMPT_USER_TEMPLATE.format(
+    """
+    Generate a DesignBrief from a text topic.
+    Uses the new AI client (Groq → Gemini failover).
+    """
+    logger.info("Generating motion brief from topic | topic=%r style=%s", topic, style)
+
+    system = load_prompt("base")
+    prompt = load_prompt(
+        "motion_brief",
         topic=topic,
         style=style,
         aspect_ratio=aspect_ratio,
@@ -164,104 +72,113 @@ async def generate_brief_from_topic(
         duration=duration,
     )
 
-    raw_text = await _generate_with_gemini(
-        [_BRIEF_SYSTEM, prompt],
+    raw = await generate_json(
+        prompt=prompt,
+        system=system,
         temperature=0.7,
+        max_tokens=1000  # Phase 2A: Design brief (~700 tokens typical),
     )
 
-    return _parse_brief(raw_text)
+    return _validate_brief(raw)
 
 
 async def generate_brief_from_flyer(
     flyer_image_path: Path,
-    style: str,
-    aspect_ratio: str,
-    duration: int,
+    style:            str,
+    aspect_ratio:     str,
+    duration:         int,
 ) -> dict:
+    """
+    Generate a DesignBrief by reading a flyer image.
+
+    Gemini SDK is used here because it supports inline image data.
+    This is the only place in the new architecture that calls a
+    provider SDK directly — justified because vision input is not
+    supported by the OpenAI-compatible Groq endpoint.
+    """
+    logger.info("Generating motion brief from flyer | path=%s", flyer_image_path.name)
+
+    from config import GEMINI_API_KEY
+    from google import genai
+    from google.genai import types as genai_types
+
     image_data = base64.b64encode(flyer_image_path.read_bytes()).decode()
-    mime = _guess_mime(flyer_image_path)
+    mime       = _guess_mime(flyer_image_path)
 
-    prompt = _FLYER_USER_TEMPLATE.format(
-        style=style,
-        aspect_ratio=aspect_ratio,
-        duration=duration,
-    )
+    system_text = load_prompt("base")
 
-    raw_text = await _generate_with_gemini(
-        [
-            _BRIEF_SYSTEM,
-            {
-                "inline_data": {
-                    "mime_type": mime,
-                    "data": image_data,
-                }
-            },
-            prompt,
+    flyer_prompt = f"""
+The user uploaded a flyer to animate.
+
+Style requested: {style}
+Aspect ratio: {aspect_ratio}
+Duration: {duration} seconds
+
+1. Extract text, brand, colors, numbers from the flyer
+2. Summarize in flyerDescription field
+3. Map everything into a DesignBrief JSON
+4. Set sourceType to "flyer"
+5. Choose the best style for this content
+
+{system_text}
+
+Generate the DesignBrief JSON.
+""".strip()
+
+    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    response = await gemini_client.aio.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[
+            flyer_prompt,
+            genai_types.Part.from_bytes(
+                data=base64.b64decode(image_data),
+                mime_type=mime,
+            ),
         ],
-        temperature=0.6,
+        config=genai_types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.6,
+            max_output_tokens=1500,
+        ),
     )
 
-    brief = _parse_brief(raw_text)
+    text = getattr(response, "text", None)
+    if not text:
+        raise ValidationError("Gemini returned empty content for flyer brief")
+
+    import json
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValidationError(f"Invalid JSON from Gemini flyer brief: {exc}", raw=text[:300]) from exc
+
+    brief = _validate_brief(raw)
     brief["sourceType"] = "flyer"
     return brief
 
 
-# ── Parsing + Validation ───────────────────────────────────────────────────────
+# ── Internal helpers ───────────────────────────────────────────────────────────
 
-def _parse_brief(raw_text: str) -> dict:
-    text = raw_text.strip()
-
-    # Remove markdown fences
-    text = re.sub(r"^```(?:json)?\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
-    text = text.strip()
-
+def _validate_brief(raw: dict) -> dict:
+    """
+    Validate and coerce the raw dict using the DesignBrief Pydantic model,
+    then return a plain dict for compatibility with existing pipeline code.
+    """
     try:
-        brief = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON from Gemini:\n{text[:500]}") from e
-
-    _validate_brief(brief)
-    return brief
-
-
-def _validate_brief(brief: dict) -> None:
-    required = ["style", "aspectRatio", "brandColor", "bgColor", "textColor", "title"]
-
-    for key in required:
-        if key not in brief:
-            raise ValueError(f"Missing required field: {key}")
-
-    if brief.get("style") not in {"minimal", "bold", "glassmorphism", "neon"}:
-        brief["style"] = "minimal"
-
-    if brief.get("aspectRatio") not in {"9:16", "16:9", "1:1"}:
-        brief["aspectRatio"] = "9:16"
-
-    brief.setdefault("durationSeconds", 15)
-    brief.setdefault("animationSpeed", "normal")
-    brief.setdefault("fontPairing", "syne_dmsans")
-    brief.setdefault("sourceType", "prompt")
+        brief = DesignBrief.model_validate(raw)
+        return brief.model_dump(exclude_none=False)
+    except Exception as exc:
+        import json as _json
+        raise ValidationError(
+            f"DesignBrief validation failed: {exc}",
+            raw=_json.dumps(raw)[:300],
+        ) from exc
 
 
 def _guess_mime(path: Path) -> str:
     return {
-        ".jpg": "image/jpeg",
+        ".jpg":  "image/jpeg",
         ".jpeg": "image/jpeg",
-        ".png": "image/png",
+        ".png":  "image/png",
         ".webp": "image/webp",
     }.get(path.suffix.lower(), "image/jpeg")
-
-
-# ── Remotion Mapping ───────────────────────────────────────────────────────────
-
-STYLE_TO_COMPOSITION = {
-    "minimal": "MinimalVideo",
-    "bold": "BoldVideo",
-    "glassmorphism": "GlassmorphismVideo",
-    "neon": "NeonVideo",
-}
-
-
-def brief_to_composition_id(brief: dict) -> str:
-    return STYLE_TO_COMPOSITION.get(brief.get("style", "minimal"), "MinimalVideo")

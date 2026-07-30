@@ -1,0 +1,52 @@
+[
+  {
+    "experiment": "A_plain_text",
+    "model": "gemini-2.5-flash",
+    "max_output_tokens": 4500,
+    "json_mode": false,
+    "finish_reason": "FinishReason.STOP",
+    "prompt_tokens": 27,
+    "output_tokens": 1342,
+    "total_tokens": 2391,
+    "word_count": 1015,
+    "char_count": 7032,
+    "text_sample": "The ambition to imbue inanimate objects with human-like intelligence is a narrative as old as humanity itself, woven into ancient myths of automatons and golems. From the mythical Talos, a bronze giant built by Hephaestus, to the mechanical duck of Jacques de Vaucanson in the 18th century, the human imagination has consistently conjured visions of artificial beings. However, the scientific pursuit of artificial intelligence, a field dedicated to creating machines that can reason, learn, and act "
+  },
+  {
+    "experiment": "B_json_mode",
+    "model": "gemini-2.5-flash",
+    "max_output_tokens": 4500,
+    "json_mode": true,
+    "finish_reason": "FinishReason.MAX_TOKENS",
+    "prompt_tokens": 63,
+    "output_tokens": 502,
+    "total_tokens": 4548,
+    "word_count": 0,
+    "char_count": 2532,
+    "text_sample": "{\n  \"title\": \"The Odyssey of Artificial Intelligence: A Journey Through Minds and Machines\",\n  \"content\": \"The history of Artificial Intelligence (AI) is a captivating saga of human ambition, scientific ingenuity, and philosophical inquiry, spanning centuries from ancient myths to the sophisticated algorithms of today. While the term \\\"Artificial Intelligence\\\" was coined in 1956, the dream of creating intelligent machines predates modern computing, rooted in the desire to replicate human though",
+    "json_valid": false
+  },
+  {
+    "experiment": "C_narration_only",
+    "model": "gemini-2.5-flash",
+    "max_output_tokens": 4500,
+    "json_mode": true,
+    "finish_reason": "FinishReason.MAX_TOKENS",
+    "prompt_tokens": 64,
+    "output_tokens": 167,
+    "total_tokens": 4548,
+    "word_count": 0,
+    "char_count": 910,
+    "text_sample": "{\n  \"narration\": \"The history of artificial intelligence intertwines ambitious dreams, profound philosophy, scientific breakthroughs, and periods of both fervent optimism and sobering disillusionment. Its roots stretch back long before computers, to ancient myths of intelligent automatons and philosophical inquiries into thought and consciousness. Figures like Ren\u00e9 Descartes pondered the mechanical nature of the body, while Gottfried Leibniz envisioned a universal language of thought and a calcu",
+    "json_valid": false
+  },
+  {
+    "experiment": "D_documentary_script",
+    "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+  },
+  {
+    "test": "client_verification",
+    "success": true,
+    "result_type": "<class 'dict'>"
+  }
+]

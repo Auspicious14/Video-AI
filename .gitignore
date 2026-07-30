@@ -16,6 +16,8 @@ Thumbs.db
 
 # Project Specific
 outputs/
+workdir/*
+scripts/*
 wav2lip/checkpoints/*.pth
 wav2lip/checkpoints/*.pk
 wav2lip/temp/

@@ -56,17 +56,18 @@ app.include_router(credits.router)
 @app.get("/health", tags=["system"])
 def health():
     """System health check — returns version and infrastructure status."""
-    from config import DEV_MODE, GEMINI_API_KEY, HF_API_KEY
+    from config import DEV_MODE, GEMINI_API_KEY, HF_API_KEY, GROQ_API_KEY
     return {
         "status":      "ok",
         "version":     "3.0.0",
         "dev_mode":    DEV_MODE,
         "gemini":      bool(GEMINI_API_KEY),
         "huggingface": bool(HF_API_KEY),
-        "architecture": {
-            "layer_a": "FFmpeg deterministic composition — always available",
-            "layer_b": "FLUX.1-schnell + gTTS — requires HF_API_KEY",
-            "layer_c": "Wan2.1 / CogVideoX-5B — optional, HF free tier",
-        },
+        "groq":      bool(GROQ_API_KEY),
+        # "architecture": {
+        #     "layer_a": "FFmpeg deterministic composition — always available",
+        #     "layer_b": "FLUX.1-schnell + kokorotts — requires HF_API_KEY",
+        #     "layer_c": "Wan2.1 / CogVideoX-5B — optional, HF free tier",
+        # },
         "wav2lip": is_wav2lip_ready(),
     }

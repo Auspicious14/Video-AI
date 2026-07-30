@@ -6,6 +6,10 @@ load_dotenv()
 
 # ── AI ────────────────────────────────────────────────────────────────────────
 GEMINI_API_KEY     = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY       = os.getenv("GROQ_API_KEY", "")
+CEREBRAS_API_KEY   = os.getenv("CEREBRAS_API_KEY", "")
+MISTRAL_API_KEY    = os.getenv("MISTRAL_API_KEY", "")
+
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")   # optional — leave blank for gTTS
 HF_API_KEY         = os.getenv("HF_API_KEY", "")            # free token: huggingface.co/settings/tokens
 FAL_KEY            = os.getenv("FAL_KEY", "")               # fal.ai API key for FLUX.1-dev
@@ -41,3 +45,11 @@ PLANS = {
     "pro":      {"amount": 500000,  "credits": 15, "label": "Pro ₦5,000"},
     "business": {"amount": 1200000, "credits": 50, "label": "Business ₦12,000"},
 }
+
+
+PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "")
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
+
+UNSPLASH_ACCESS_KEY= os.getenv("UNSPLASH_ACCESS_KEY", "")
+UNSPLASH_SECRET_KEY= os.getenv("UNSPLASH_SECRET_KEY", "")
+UNSPLASH_APP_ID= os.getenv("UNSPLASH_APP_ID", "")

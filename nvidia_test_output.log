@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/Products/videoAI/test_nvidia_production.py", line 18, in <module>
+    from services.ai.studio.pipeline import run_youtube_studio_production
+  File "/Users/Products/videoAI/services/ai/studio/pipeline.py", line 9, in <module>
+    from config import OUTPUT_DIR
+  File "/Users/Products/videoAI/config.py", line 3, in <module>
+    from dotenv import load_dotenv
+ModuleNotFoundError: No module named 'dotenv'

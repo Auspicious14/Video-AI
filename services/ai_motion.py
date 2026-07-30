@@ -1,6 +1,5 @@
 """
 services/ai_motion.py  —  Layer C: AI Motion Enhancement (selective)
-═══════════════════════════════════════════════════════════════════════════════
 
 Role in hybrid pipeline:
   This layer is OPTIONAL and ADDITIVE.  The deterministic Layer A
@@ -21,9 +20,9 @@ Design principles:
 
 import asyncio
 import hashlib
-import httpx
 import json
 import time
+import traceback
 from pathlib import Path
 from typing import Optional
 from config import HF_API_KEY, OUTPUT_DIR
@@ -34,9 +33,9 @@ HF_API_BASE          = "https://api-inference.huggingface.co/models"
 SVD_MODEL            = "stabilityai/stable-video-diffusion-img2vid-xt"
 
 MAX_RETRIES          = 3
-RETRY_BACKOFF_BASE   = 4.0    # seconds (doubles on each retry)
+RETRY_BACKOFF_BASE   = 4.0   # seconds (doubles on each retry)
 GENERATION_TIMEOUT   = 120.0  # seconds — after this, skip and use Layer A
-POLL_INTERVAL        = 5.0    # seconds between async polling attempts
+POLL_INTERVAL        = 5.0   # seconds between async polling attempts
 
 # Clip cache directory
 CLIP_CACHE_DIR = OUTPUT_DIR / "clip_cache"
@@ -102,9 +101,10 @@ async def generate_ai_clip(
             return result
 
     except asyncio.TimeoutError:
-        print(f"[ai_motion] ⏱ Timeout for scene {scene_index} — Layer A will handle it")
+        print(f"[ai_motion] ⏱️ Timeout for scene {scene_index} — Layer A will handle it")
     except Exception as e:
         print(f"[ai_motion] ✗ Scene {scene_index} AI generation failed: {e}")
+        print(traceback.format_exc())
 
     return None
 
@@ -152,6 +152,7 @@ async def generate_ai_clips_parallel(
 
 
 
+
 async def _try_text_to_video(
     prompt: str,
     duration: float,
@@ -169,11 +170,12 @@ async def _try_text_to_video(
     def _sync():
         try:
             from huggingface_hub import InferenceClient
-            client = InferenceClient(provider="fal-ai", api_key=HF_API_KEY)
+            client = InferenceClient(api_key=HF_API_KEY)
             video = client.text_to_video(enhanced_prompt, model="Wan-AI/Wan2.2-TI2V-5B")
             return video if isinstance(video, bytes) else (video.read() if hasattr(video, "read") else None)
         except Exception as e:
-            print(f"[ai_motion] text_to_video failed: {e}")
+            print(f"[ai_motion] text-to-video failed: {e}")
+            print(traceback.format_exc())
             return None
 
     if progress_callback:
@@ -188,54 +190,6 @@ async def _try_text_to_video(
     return None
 
 
-
-# ─── Text-to-Video (Wan2.1) THIS IS 410 ERROR: GONE ───────────────────────────────────────────────────
-
-# async def _try_text_to_video(
-#     prompt: str,
-#     duration: float,
-#     output_path: Path,
-#     width: int,
-#     height: int,
-#     progress_callback=None,
-# ) -> Optional[Path]:
-#     """
-#     Submits a text-to-video job to Wan2.1 via HF Inference API.
-#     HF API can be synchronous (bytes in response) or async (202 + polling).
-#     Handles both patterns transparently.
-#     """
-#     enhanced_prompt = (
-#         f"cinematic {width}x{height} vertical video, 9:16 aspect ratio, "
-#         f"smooth camera motion, professional cinematography, "
-#         f"{prompt}"
-#     )
-
-#     headers = {
-#         "Authorization": f"Bearer {HF_API_KEY}",
-#         "Content-Type": "application/json",
-#         "X-Wait-For-Model": "true",
-#     }
-#     payload = {
-#         "inputs": enhanced_prompt,
-#         "parameters": {
-#             "num_frames": max(16, int(duration * 8)),
-#             "width": width,
-#             "height": height,
-#         }
-#     }
-
-#     if progress_callback:
-#         await _safe_callback(progress_callback, f"🎬 Generating AI clip via Wan2.1…")
-
-#     return await _hf_inference_with_retry(
-#         model=WAN2_MODEL,
-#         headers=headers,
-#         payload=payload,
-#         output_path=output_path,
-#         content_type_check="video",
-#     )
-
-
 # ─── Image-to-Video (SVD) ────────────────────────────────────────────────────
 
 async def _try_image_to_video(
@@ -248,39 +202,39 @@ async def _try_image_to_video(
     progress_callback=None,
 ) -> Optional[Path]:
     """
-    Submits an image-to-video job to Stable Video Diffusion via HF.
-    Encodes the image as base64 and sends as multipart.
+    Submits an image-to-video job to Stable Video Diffusion via HF InferenceClient.
     """
-    import base64
-    image_b64 = base64.b64encode(image_path.read_bytes()).decode()
-
-    headers = {
-        "Authorization": f"Bearer {HF_API_KEY}",
-        "Content-Type": "application/json",
-        "X-Wait-For-Model": "true",
-    }
-    payload = {
-        "inputs": f"data:image/jpeg;base64,{image_b64}",
-        "parameters": {
-            "num_frames": max(16, int(duration * 6)),
-            "motion_bucket_id": 127,   # controls motion intensity (0-255)
-            "noise_aug_strength": 0.02,
-        }
-    }
+    from huggingface_hub import AsyncInferenceClient
+    from PIL import Image
 
     if progress_callback:
         await _safe_callback(progress_callback, f"🖼️ Animating image via SVD…")
 
-    return await _hf_inference_with_retry(
-        model=SVD_MODEL,
-        headers=headers,
-        payload=payload,
-        output_path=output_path,
-        content_type_check="video",
-    )
+    try:
+        image = Image.open(image_path)
+        
+        # Use AsyncInferenceClient for async operations
+        client = AsyncInferenceClient(api_key=HF_API_KEY)
+        
+        # Generate video using image-to-video
+        video_bytes = await client.image_to_video(
+            image=image,
+            model=SVD_MODEL,
+            num_frames=max(16, int(duration * 6)),
+            motion_bucket_id=127,   # controls motion intensity (0-255)
+            noise_aug_strength=0.02,
+        )
+        
+        # Save the video
+        output_path.write_bytes(video_bytes)
+        return output_path
+    except Exception as e:
+        print(f"[ai_motion] image-to-video failed: {e}")
+        print(traceback.format_exc())
+        return None
 
 
-# ─── HF Inference call with retry ────────────────────────────────────────────
+# ─── HF Inference call with retry (kept for compatibility) ────────────────────
 
 async def _hf_inference_with_retry(
     model: str,
@@ -290,115 +244,31 @@ async def _hf_inference_with_retry(
     content_type_check: str = "video",
 ) -> Optional[Path]:
     """
-    Calls HF Inference API with exponential backoff on 429/503.
-    Handles both synchronous (200 + body) and async (202 + polling) responses.
+    Kept for compatibility, but not used anymore — use AsyncInferenceClient instead.
     """
-    url     = f"{HF_API_BASE}/{model}"
-    backoff = RETRY_BACKOFF_BASE
-
-    async with httpx.AsyncClient(timeout=GENERATION_TIMEOUT) as client:
-        for attempt in range(MAX_RETRIES):
-            try:
-                resp = await client.post(url, headers=headers, json=payload)
-
-                if resp.status_code == 200:
-                    content_type = resp.headers.get("content-type", "")
-                    if content_type_check in content_type or len(resp.content) > 50_000:
-                        output_path.write_bytes(resp.content)
-                        return output_path
-                    # Might be JSON with a URL
-                    try:
-                        data = resp.json()
-                        if isinstance(data, dict) and "url" in data:
-                            return await _download_url(client, data["url"], output_path)
-                    except Exception:
-                        pass
-                    print(f"[ai_motion] Unexpected 200 content-type: {content_type}")
-                    return None
-
-                elif resp.status_code == 202:
-                    # Async job — poll for completion
-                    data = resp.json()
-                    job_url = data.get("job_id") or resp.headers.get("location")
-                    if job_url:
-                        return await _poll_hf_job(client, job_url, headers, output_path)
-                    return None
-
-                elif resp.status_code in (429, 503):
-                    print(f"[ai_motion] HF rate-limited ({resp.status_code}), retry in {backoff:.0f}s…")
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, 60)
-
-                elif resp.status_code == 404:
-                    print(f"[ai_motion] Model {model} not found or unavailable")
-                    return None
-
-                elif resp.status_code == 401:
-                    print("[ai_motion] Invalid HF_API_KEY — check .env")
-                    return None
-
-                else:
-                    print(f"[ai_motion] Unexpected status {resp.status_code}: {resp.text[:200]}")
-                    return None
-
-            except httpx.TimeoutException:
-                print(f"[ai_motion] Request timeout (attempt {attempt + 1})")
-                if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, 60)
-
     return None
 
 
 async def _poll_hf_job(
-    client: httpx.AsyncClient,
+    client,
     job_url: str,
     headers: dict,
     output_path: Path,
 ) -> Optional[Path]:
-    """Polls an async HF job until completion or timeout."""
-    deadline = time.monotonic() + GENERATION_TIMEOUT
-    while time.monotonic() < deadline:
-        await asyncio.sleep(POLL_INTERVAL)
-        try:
-            resp = await client.get(job_url, headers=headers)
-            if resp.status_code == 200:
-                content_type = resp.headers.get("content-type", "")
-                if "video" in content_type or len(resp.content) > 50_000:
-                    output_path.write_bytes(resp.content)
-                    return output_path
-                data = resp.json()
-                status = data.get("status", "")
-                if status == "completed":
-                    url = data.get("output") or data.get("url")
-                    if url:
-                        return await _download_url(client, url, output_path)
-                elif status in ("failed", "error"):
-                    print(f"[ai_motion] HF job failed: {data}")
-                    return None
-        except Exception as e:
-            print(f"[ai_motion] Poll error: {e}")
-
-    print("[ai_motion] Polling timed out")
+    """Kept for compatibility."""
     return None
 
 
 async def _download_url(
-    client: httpx.AsyncClient,
+    client,
     url: str,
     output_path: Path,
 ) -> Optional[Path]:
-    try:
-        resp = await client.get(url)
-        if resp.status_code == 200:
-            output_path.write_bytes(resp.content)
-            return output_path
-    except Exception as e:
-        print(f"[ai_motion] Download failed: {e}")
+    """Kept for compatibility."""
     return None
 
 
-# ─── Clip cache ───────────────────────────────────────────────────────────────
+# ─── Clip cache ────────────────────────────────────────────────────────────────
 
 def _make_cache_key(prompt: str, duration: float, width: int, height: int) -> str:
     raw = f"{prompt}|{duration:.1f}|{width}x{height}"
@@ -421,7 +291,7 @@ def _save_to_cache(key: str, clip_path: Path) -> None:
         print(f"[ai_motion] Cache write failed: {e}")
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# ─── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _safe_callback(callback, message: str) -> None:
     try:

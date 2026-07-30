@@ -17,7 +17,7 @@ Architecture (Layers A / B / C):
   ┌─ Layer A: Deterministic Composition Engine (this file)
   │   • FFmpeg zoompan / parallax / transitions
   │   • PIL subtitle + overlay compositing
-  │   • Fixed 30 fps, fixed aspect ratio 576×1024 (9:16)
+  │   • Fixed 30 fps, configurable aspect ratio (9:16, 16:9, 1:1)
   │
   ├─ Layer B: AI asset generation (images.py / audio.py)
   └─ Layer C: AI motion clips (ai_motion.py) — optional enhancement
@@ -32,8 +32,8 @@ from config import OUTPUT_DIR
 
 # ─── Master constants ─────────────────────────────────────────────────────────
 FPS    = 30          # LOCKED — never change per-call, use this everywhere
-W      = 1080        # output width  (9:16 portrait for TikTok)
-H      = 1920        # output height
+W      = 1080        # default output width  (9:16 portrait for TikTok)
+H      = 1920        # default output height
 SCALE  = 2           # overscan for zoompan (2× avoids black edges)
 SW     = W * SCALE   # 2160
 SH     = H * SCALE   # 3840
@@ -43,132 +43,154 @@ MAX_Z  = 1.5
 ZOOM_STEP = 0.0007
 
 
+def dimensions_for_aspect_ratio(aspect_ratio: str = "9:16") -> tuple[int, int]:
+    """Return render dimensions for supported aspect ratios."""
+    if aspect_ratio == "16:9":
+        return 1920, 1080
+    if aspect_ratio == "1:1":
+        return 1080, 1080
+    return W, H
+
+
 # ─── Motion effect presets (deterministic, no randomness) ────────────────────
 # All expressions use trunc() to snap to integer pixel coords.
 # d = total frames for the clip.  fps= must match FPS constant.
 
-def _zoom_in(duration: float, fps: int = FPS) -> str:
+def _render_dims(width: int, height: int) -> tuple[int, int, int, int]:
+    return width, height, width * SCALE, height * SCALE
+
+
+def _zoom_in(duration: float, fps: int = FPS, width: int = W, height: int = H) -> str:
     """Slow push-in from 1.0× to MAX_Z×."""
     d = max(1, int(duration * fps))
+    w, h, sw, sh = _render_dims(width, height)
     return (
-        f"scale={SW}:{SH},"
+        f"scale={sw}:{sh},"
         f"zoompan="
         f"z='if(lte(on,1),1,zoom+{ZOOM_STEP:.4f})':"
         f"x='trunc(iw/2-(iw/zoom/2))':"
         f"y='trunc(ih/2-(ih/zoom/2))':"
-        f"d={d}:fps={fps}:s={W}x{H}"
+        f"d={d}:fps={fps}:s={w}x{h}"
     )
 
 
-def _zoom_out(duration: float, fps: int = FPS) -> str:
+def _zoom_out(duration: float, fps: int = FPS, width: int = W, height: int = H) -> str:
     """Pull-back from MAX_Z× to 1.0×."""
     d = max(1, int(duration * fps))
+    w, h, sw, sh = _render_dims(width, height)
     return (
-        f"scale={SW}:{SH},"
+        f"scale={sw}:{sh},"
         f"zoompan="
         f"z='if(eq(on,1),{MAX_Z:.1f},max({MAX_Z:.1f}-on*{ZOOM_STEP:.4f},1.0))':"
         f"x='trunc(iw/2-(iw/zoom/2))':"
         f"y='trunc(ih/2-(ih/zoom/2))':"
-        f"d={d}:fps={fps}:s={W}x{H}"
+        f"d={d}:fps={fps}:s={w}x{h}"
     )
 
 
-def _pan_right(duration: float, fps: int = FPS) -> str:
+def _pan_right(duration: float, fps: int = FPS, width: int = W, height: int = H) -> str:
     """Horizontal pan left-to-right at fixed 1.2× zoom."""
     d = max(1, int(duration * fps))
+    w, h, sw, sh = _render_dims(width, height)
     travel = f"(iw-iw/1.2)"
     return (
-        f"scale={SW}:{SH},"
+        f"scale={sw}:{sh},"
         f"zoompan="
         f"z='1.2':"
         f"x='trunc({travel}*(on-1)/({d}-1))':"
         f"y='trunc(ih/2-(ih/1.2/2))':"
-        f"d={d}:fps={fps}:s={W}x{H}"
+        f"d={d}:fps={fps}:s={w}x{h}"
     )
 
 
-def _pan_left(duration: float, fps: int = FPS) -> str:
+def _pan_left(duration: float, fps: int = FPS, width: int = W, height: int = H) -> str:
     """Horizontal pan right-to-left at fixed 1.2× zoom."""
     d = max(1, int(duration * fps))
+    w, h, sw, sh = _render_dims(width, height)
     travel = f"(iw-iw/1.2)"
     return (
-        f"scale={SW}:{SH},"
+        f"scale={sw}:{sh},"
         f"zoompan="
         f"z='1.2':"
         f"x='trunc({travel}*(1-(on-1)/({d}-1)))':"
         f"y='trunc(ih/2-(ih/1.2/2))':"
-        f"d={d}:fps={fps}:s={W}x{H}"
+        f"d={d}:fps={fps}:s={w}x{h}"
     )
 
 
-def _tilt_up(duration: float, fps: int = FPS) -> str:
+def _tilt_up(duration: float, fps: int = FPS, width: int = W, height: int = H) -> str:
     """Vertical pan top-to-bottom at fixed 1.2× zoom."""
     d = max(1, int(duration * fps))
+    w, h, sw, sh = _render_dims(width, height)
     travel = f"(ih-ih/1.2)"
     return (
-        f"scale={SW}:{SH},"
+        f"scale={sw}:{sh},"
         f"zoompan="
         f"z='1.2':"
         f"x='trunc(iw/2-(iw/1.2/2))':"
         f"y='trunc({travel}*(on-1)/({d}-1))':"
-        f"d={d}:fps={fps}:s={W}x{H}"
+        f"d={d}:fps={fps}:s={w}x{h}"
     )
 
 
-def _tilt_down(duration: float, fps: int = FPS) -> str:
+def _tilt_down(duration: float, fps: int = FPS, width: int = W, height: int = H) -> str:
     """Vertical pan bottom-to-top at fixed 1.2× zoom."""
     d = max(1, int(duration * fps))
+    w, h, sw, sh = _render_dims(width, height)
     travel = f"(ih-ih/1.2)"
     return (
-        f"scale={SW}:{SH},"
+        f"scale={sw}:{sh},"
         f"zoompan="
         f"z='1.2':"
         f"x='trunc(iw/2-(iw/1.2/2))':"
         f"y='trunc({travel}*(1-(on-1)/({d}-1)))':"
-        f"d={d}:fps={fps}:s={W}x{H}"
+        f"d={d}:fps={fps}:s={w}x{h}"
     )
 
 
-def _diagonal_pan_right_up(duration: float, fps: int = FPS) -> str:
+def _diagonal_pan_right_up(duration: float, fps: int = FPS, width: int = W, height: int = H) -> str:
     """Diagonal pan right-up at fixed 1.2× zoom."""
     d = max(1, int(duration * fps))
+    w, h, sw, sh = _render_dims(width, height)
     travel_x = f"(iw-iw/1.2)"
     travel_y = f"(ih-ih/1.2)"
     return (
-        f"scale={SW}:{SH},"
+        f"scale={sw}:{sh},"
         f"zoompan="
         f"z='1.2':"
         f"x='trunc({travel_x}*(on-1)/({d}-1))':"
         f"y='trunc({travel_y}*(1-(on-1)/({d}-1)))':"
-        f"d={d}:fps={fps}:s={W}x{H}"
+        f"d={d}:fps={fps}:s={w}x{h}"
     )
 
 
-def _diagonal_pan_left_down(duration: float, fps: int = FPS) -> str:
+def _diagonal_pan_left_down(duration: float, fps: int = FPS, width: int = W, height: int = H) -> str:
     """Diagonal pan left-down at fixed 1.2× zoom."""
     d = max(1, int(duration * fps))
+    w, h, sw, sh = _render_dims(width, height)
     travel_x = f"(iw-iw/1.2)"
     travel_y = f"(ih-ih/1.2)"
     return (
-        f"scale={SW}:{SH},"
+        f"scale={sw}:{sh},"
         f"zoompan="
         f"z='1.2':"
         f"x='trunc({travel_x}*(1-(on-1)/({d}-1)))':"
         f"y='trunc({travel_y}*(on-1)/({d}-1))':"
-        f"d={d}:fps={fps}:s={W}x{H}"
+        f"d={d}:fps={fps}:s={w}x{h}"
     )
 
 
-def _static(duration: float, fps: int = FPS) -> str:
+def _static(duration: float, fps: int = FPS, width: int = W, height: int = H) -> str:
     """Static frame — no motion at all (guaranteed stable)."""
     d = max(1, int(duration * fps))
+    w, h, sw, sh = _render_dims(width, height)
     return (
-        f"scale={SW}:{SH},"
+        f"scale={sw}:{sh},"
         f"zoompan="
         f"z='1.0':"
         f"x='trunc(iw/2-(iw/2))':"
         f"y='trunc(ih/2-(ih/2))':"
-        f"d={d}:fps={fps}:s={W}x{H}"
+        f"d={d}:fps={fps}:s={w}x{h}"
     )
 
 
@@ -281,8 +303,10 @@ def create_subtitle_overlay(
     lines: List[Tuple[str, float, float]],  # [(text, start_t, end_t), ...]
     video_path: Path,
     output_path: Path,
-    font_size: int = 32,
+    font_size: int = 46,
     fps: int = FPS,
+    width: int = W,
+    height: int = H,
 ) -> Path:
     """
     Burns subtitle cards into a video using PIL + FFmpeg overlay filter.
@@ -307,9 +331,11 @@ def create_subtitle_overlay(
         create_text_overlay(
             text, overlay_path,
             font_size=font_size,
-            y_pos=H - 200,
+            width=width,
+            height=height,
+            y_pos=height - max(220, int(height * 0.17)),
             color=(255, 255, 255, 255),
-            box_color=(0, 0, 0, 190),
+            box_color=(0, 0, 0, 200),
         )
         inputs += ["-i", str(overlay_path)]
         out_label = f"sv{idx}"
@@ -351,6 +377,8 @@ def build_scene_clip(
     effect_fn=None,
     fps: int = FPS,
     ai_clip_path: Optional[Path] = None,
+    width: int = W,
+    height: int = H,
 ) -> None:
     """
     Builds a single scene clip, either from:
@@ -361,14 +389,14 @@ def build_scene_clip(
     """
     # Layer C: use the AI-generated clip if available and valid
     if ai_clip_path and ai_clip_path.exists() and ai_clip_path.stat().st_size > 10_000:
-        _normalize_clip(ai_clip_path, output_path, duration, fps)
+        _normalize_clip(ai_clip_path, output_path, duration, fps, width=width, height=height)
         return
 
     # Layer A: deterministic Ken Burns effect
     if effect_fn is None:
         effect_fn = _zoom_in  # safe deterministic default
 
-    vf = effect_fn(duration, fps)
+    vf = effect_fn(duration, fps, width, height)
 
     result = subprocess.run([
         "ffmpeg", "-y",
@@ -390,18 +418,20 @@ def build_scene_clip(
         raise ValueError(f"Scene clip failed ({img_path.name}): {err}")
 
 
-def _normalize_clip(
-    src: Path,
-    dst: Path,
-    duration: float,
-    fps: int,
-) -> None:
-    """Re-encodes a clip to exact W×H @ fps. Used for AI video clips."""
+def _normalize_clip(src, dst, duration, fps, width=W, height=H):
+    """Re-encodes a clip to exact W×H @ fps. When source aspect doesn't match
+    the target (e.g. a vertical clip in a 16:9 frame), fills the frame with a
+    blurred, cropped copy of the same footage instead of solid black bars."""
+    filter_complex = (
+        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},gblur=sigma=20,setsar=1[bg];"
+        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1[fg];"
+        f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
+    )
     result = subprocess.run([
         "ffmpeg", "-y",
         "-i", str(src),
-        "-vf", f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
-               f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1",
+        "-filter_complex", filter_complex,
         "-t", str(duration),
         "-r", str(fps),
         "-pix_fmt", "yuv420p",
@@ -411,10 +441,7 @@ def _normalize_clip(
         str(dst),
     ], capture_output=True)
     if result.returncode != 0:
-        raise ValueError(
-            f"Clip normalization failed: {result.stderr.decode()[-300:]}"
-        )
-
+        raise ValueError(f"Clip normalization failed: {result.stderr.decode()[-300:]}")
 
 # ─── Final video assembler ────────────────────────────────────────────────────
 
@@ -430,6 +457,8 @@ def build_final_video(
     transition_duration: float = 0.4,
     subtitle_lines: Optional[List[Tuple[str, float, float]]] = None,
     bgm_path: Optional[Path] = None,
+    width: int = W,
+    height: int = H,
 ) -> Path:
     """
     Full deterministic composition:
@@ -450,12 +479,18 @@ def build_final_video(
     cta_overlay  = tmp / "cta.png"
     create_text_overlay(
         hook_text, hook_overlay,
-        font_size=40, y_pos=88,
+        font_size=max(34, int(width * 0.037)),
+        width=width,
+        height=height,
+        y_pos=max(52, int(height * 0.055)),
         color=(255, 255, 255, 255), box_color=(0, 0, 0, 175),
     )
     create_text_overlay(
         cta_text, cta_overlay,
-        font_size=36, y_pos=H - 195,
+        font_size=max(30, int(width * 0.032)),
+        width=width,
+        height=height,
+        y_pos=height - max(160, int(height * 0.10)),
         color=(255, 220, 50, 255), box_color=(0, 0, 0, 185),
     )
 
@@ -488,7 +523,7 @@ def build_final_video(
     if subtitle_lines:
         sub_out = tmp / "subtitled.mp4"
         subtitled = create_subtitle_overlay(
-            subtitle_lines, overlaid, sub_out, fps=fps
+            subtitle_lines, overlaid, sub_out, fps=fps, width=width, height=height
         )
 
     # 4. Audio mux
@@ -537,6 +572,7 @@ async def render_video(
     ai_clip_paths: Optional[List[Optional[Path]]] = None,  # Layer C clips
     subtitle_lines: Optional[List[Tuple[str, float, float]]] = None,
     bgm_path: Optional[Path] = None,
+    aspect_ratio: str = "9:16",
 ) -> Path:
     """
     Main render entry-point for the hybrid pipeline.
@@ -546,6 +582,7 @@ async def render_video(
     """
     output_path = OUTPUT_DIR / f"{job_id}_final.mp4"
     fps         = FPS
+    width, height = dimensions_for_aspect_ratio(aspect_ratio)
 
     # Sanity checks
     if not audio_path.exists() or audio_path.stat().st_size < 100:
@@ -571,6 +608,8 @@ async def render_video(
                 img_path, duration, clip_path,
                 effect_fn=effect_fn, fps=fps,
                 ai_clip_path=ai_clip,
+                width=width,
+                height=height,
             )
             scene_clips.append((clip_path, duration))
 
@@ -586,6 +625,8 @@ async def render_video(
             transition_duration=0.4,
             subtitle_lines=subtitle_lines,
             bgm_path=bgm_path,
+            width=width,
+            height=height,
         )
 
     return output_path
@@ -601,6 +642,7 @@ async def render_still_to_motion(
     actual_duration: float,
     job_id: str,
     effect_fn=None,
+    aspect_ratio: str = "9:16",
 ) -> Path:
     """
     Single-image Ken Burns animation pipeline.
@@ -608,6 +650,7 @@ async def render_still_to_motion(
     """
     output_path = OUTPUT_DIR / f"{job_id}_final.mp4"
     fps         = FPS
+    width, height = dimensions_for_aspect_ratio(aspect_ratio)
 
     if effect_fn is None:
         effect_fn = _zoom_in  # deterministic default
@@ -615,8 +658,15 @@ async def render_still_to_motion(
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         clip_path = tmp / "clip_00.mp4"
-        build_scene_clip(image_path, actual_duration, clip_path,
-                         effect_fn=effect_fn, fps=fps)
+        build_scene_clip(
+            image_path,
+            actual_duration,
+            clip_path,
+            effect_fn=effect_fn,
+            fps=fps,
+            width=width,
+            height=height,
+        )
 
         build_final_video(
             scene_clips=[(clip_path, actual_duration)],
@@ -627,6 +677,8 @@ async def render_still_to_motion(
             output_path=output_path,
             tmp=tmp,
             fps=fps,
+            width=width,
+            height=height,
         )
 
     return output_path
@@ -734,6 +786,7 @@ async def render_avatar_video(
     script: dict,
     job_id: str,
     actual_duration: float,
+    aspect_ratio: str = "9:16",
 ) -> Path:
     """
     Composes the final avatar video:
@@ -746,13 +799,14 @@ async def render_avatar_video(
     They are kept for potential future use without re-generation cost.
     """
     output_path = OUTPUT_DIR / f"{job_id}_final.mp4"
+    width, height = dimensions_for_aspect_ratio(aspect_ratio)
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
 
         # ── Step 1: normalise avatar clip ─────────────────────────────────────
         normalised = tmp / "avatar_normalised.mp4"
-        _normalize_clip(avatar_clip, normalised, actual_duration, FPS)
+        _normalize_clip(avatar_clip, normalised, actual_duration, FPS, width=width, height=height)
 
         # ── Step 2: text overlays ─────────────────────────────────────────────
         hook_overlay = tmp / "hook.png"
@@ -761,14 +815,20 @@ async def render_avatar_video(
         create_text_overlay(
             script.get("hook", ""),
             hook_overlay,
-            font_size=40, y_pos=88,
+            font_size=max(34, int(width * 0.037)),
+            width=width,
+            height=height,
+            y_pos=max(52, int(height * 0.055)),
             color=(255, 255, 255, 255),
             box_color=(0, 0, 0, 175),
         )
         create_text_overlay(
             script.get("cta", ""),
             cta_overlay,
-            font_size=36, y_pos=H - 195,
+            font_size=max(30, int(width * 0.032)),
+            width=width,
+            height=height,
+            y_pos=height - max(160, int(height * 0.10)),
             color=(255, 220, 50, 255),
             box_color=(0, 0, 0, 185),
         )

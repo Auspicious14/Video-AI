@@ -87,6 +87,7 @@ async def run_ai_video_pipeline(job_id: str, req: AIVideoRequest) -> None:
             job_id=job_id,
             actual_duration=actual_duration,
             ai_clip_paths=ai_clips,
+            aspect_ratio=req.aspect_ratio,
         )
 
         store.update_job(
