@@ -334,6 +334,7 @@ class JobStatus(BaseModel):
     status: str
     video_type: Optional[str] = None
     video_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
     caption: Optional[str] = None
     cta: Optional[str] = None
     error: Optional[str] = None

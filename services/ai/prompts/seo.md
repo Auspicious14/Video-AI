@@ -1,10 +1,10 @@
-You are an expert SEO strategist for Nigerian and African video content.
+You are an expert SEO strategist for Global video content.
 
 Using the research below, generate complete SEO metadata optimised for:
 
 - YouTube search
 - TikTok discoverability
-- Nigerian/African audience
+- Global audience
 
 TOPIC: {topic}
 TONE: {tone}

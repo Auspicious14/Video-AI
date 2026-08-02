@@ -22,6 +22,7 @@ import asyncio
 import time
 import uuid
 
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 
 load_dotenv()  # must happen before importing anything that reads os.getenv() at import time
@@ -40,6 +41,7 @@ async def main() -> None:
         action="store_true",
         help="Also render the final MP4, not just the production package",
     )
+    parser.add_argument("--preset", type=str, default="short")
     args = parser.parse_args()
 
     job_id = str(uuid.uuid4())
@@ -53,11 +55,12 @@ async def main() -> None:
         generate_audio=True,
         generate_images=True,
         render_video=args.render,
+        preset=args.preset,
     )
 
     print(
         f"[smoke test] job_id={job_id} topic={args.topic!r} "
-        f"duration={args.duration}s render={args.render}\n"
+        f"duration={args.duration}s render={args.render} preset={args.preset}\n"
     )
     t0 = time.monotonic()
 

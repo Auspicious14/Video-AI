@@ -62,14 +62,12 @@ Usage
 """
 
 from __future__ import annotations
+from services.ai.studio.agent_utils import generate_structured_artifact
 
 import json
 import logging
 from typing import Optional
-
-from services.ai.client import generate_json
 from services.ai.exceptions import ValidationError
-from services.ai.prompts import load_prompt
 from services.ai.schemas import (
     AudienceInsights,
     ContentAngles,
@@ -80,7 +78,11 @@ from services.ai.schemas import (
     ResearchResult,
     RiskFlag,
     VisualOpportunity,
+    ResearchVisualContext,
+    ResearchCoreFacts, ResearchEngagement,
 )
+from services.ai.studio.cache import get_or_create_artifact
+
 
 logger = logging.getLogger(__name__)
 
@@ -103,36 +105,13 @@ _VALID_PLATFORMS = {
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 async def run_research(
-    topic:           str,
-    tone:            str  = "educational",
-    duration:        int  = 30,
-    platform:        str  = PLATFORM_TIKTOK,
-    niche_context:   str  = "",
-    audience_profile: str = "",
+    topic:            str,
+    tone:             str  = "educational",
+    duration:         int  = 30,
+    platform:         str  = PLATFORM_TIKTOK,
+    niche_context:    str  = "",
+    audience_profile: str  = "",
 ) -> ResearchResult:
-    """
-    Generate a comprehensive structured ResearchResult for a topic.
-
-    Parameters
-    ----------
-    topic:            The subject to research.
-    tone:             Desired emotional tone.
-                      Values: educational | urgent | empathetic | inspiring | conversational
-    duration:         Target video duration in seconds — longer duration → deeper research.
-    platform:         Target distribution platform.
-                      Values: tiktok | youtube_shorts | youtube_long | instagram | blog | linkedin
-    niche_context:    Optional domain context, e.g. "health awareness for pregnant women".
-    audience_profile: Optional audience description, e.g. "Nigerian mothers 18–35".
-
-    Returns
-    -------
-    Validated ResearchResult instance.
-
-    Raises
-    ------
-    ProviderError:   All providers failed after failover.
-    ValidationError: Response failed schema validation.
-    """
     if platform not in _VALID_PLATFORMS:
         logger.warning("Unknown platform %r — defaulting to 'tiktok'", platform)
         platform = PLATFORM_TIKTOK
@@ -142,29 +121,49 @@ async def run_research(
         topic, platform, tone, duration,
     )
 
-    system = load_prompt("base")
-    prompt = load_prompt(
-        "research",
-        topic=topic,
-        tone=tone,
-        platform=platform,
-        duration=duration,
-        niche_context=niche_context or "No specific niche context.",
-        audience_profile=audience_profile or "General Nigerian/African audience.",
+    shared_vars = {
+        "topic": topic,
+        "tone": tone,
+        "platform": platform,
+        "duration": duration,
+        "niche_context": niche_context or "No specific niche context.",
+        "audience_profile": audience_profile,
+    }
+
+    async def _module(stage: str, prompt_name: str, model: type, max_tokens: int):
+        return await get_or_create_artifact(
+            stage=f"research_{stage}",
+            payload={"stage": stage, **shared_vars},
+            model=model,
+            factory=lambda: generate_structured_artifact(
+                prompt_name=prompt_name,
+                model=model,
+                temperature=0.45,
+                max_tokens=max_tokens,
+                variables=shared_vars,
+            ),
+        )
+
+    core = await _module(
+        "core_facts", "research_core_facts", ResearchCoreFacts,
+        _tokens_for_duration(duration, "core"),
+    )
+    engagement = await _module(
+        "engagement", "research_engagement", ResearchEngagement,
+        _tokens_for_duration(duration, "engagement"),
+    )
+    visual_context = await _module(
+        "visual_context", "research_visual_context", ResearchVisualContext,
+        _tokens_for_duration(duration, "visual"),
     )
 
-    # Longer content gets more tokens for deeper research
-    max_tokens = _tokens_for_duration(duration)
+    merged = {
+        **core.model_dump(mode="json"),
+        **engagement.model_dump(mode="json"),
+        **visual_context.model_dump(mode="json"),
+    }
 
-    raw: dict = await generate_json(
-        prompt=prompt,
-        system=system,
-        temperature=0.45,   # lower = more factual, less inventive
-        max_tokens=max_tokens,
-    )
-
-    return _validate_and_repair(raw, topic=topic, platform=platform, tone=tone)
-
+    return _validate_and_repair(merged, topic=topic, platform=platform, tone=tone)
 
 # ── Summary formatters (for downstream agents) ────────────────────────────────
 
@@ -364,23 +363,21 @@ def research_risks_summary(research: ResearchResult) -> str:
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
-def _tokens_for_duration(duration: int) -> int:
+def _tokens_for_duration(duration: int, module: str) -> int:
     """
-    Scale max_tokens with target duration.
-
-    Short clips need less research depth than long-form videos.
-    Capped at 3800 — safely below Mistral free-tier's 4096 output limit.
-    Groq and Gemini can handle larger, and client.py's _clamp_tokens_for_provider
-    scales down per-provider automatically.
+    Scale max_tokens with target duration AND module size — each module is
+    far smaller than the old monolithic call, so budgets are correspondingly
+    smaller. Capped well under Mistral free-tier's 4096 output limit even at
+    the largest duration tier.
     """
+    base = {"core": 1200, "engagement": 1600, "visual": 1600}[module]
     if duration <= 60:
-        return 2200
-    if duration <= 300:
-        return 3000
-    if duration <= 900:
-        return 3800
-    return 3800
-
+        scale = 1.0
+    elif duration <= 300:
+        scale = 1.3
+    else:
+        scale = 1.6
+    return min(3800, round(base * scale))
 
 def _validate_and_repair(raw: dict, *, topic: str, platform: str, tone: str) -> ResearchResult:
     """

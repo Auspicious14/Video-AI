@@ -709,12 +709,14 @@ def _build_section_prompt(
             "- Do not repeat completed sections.",
             "- End this section cleanly, without starting the next section.",
             "- Use only facts from the research summary and story outline.",
+            "- Every specific number, date, or statistic MUST come directly from the research summary above — never invent, round dramatically, or embellish a figure for effect.",
+            "- Include at least one concrete, specific detail from the research (a name, date, place, or number) — do not describe this section only in abstract terms like 'relentless innovation' or 'against all odds'.",
+            "- If this is not the opening section, your first sentence should connect naturally to the last point in CONTINUITY FROM COMPLETED SECTIONS — do not start cold as if this were a new, unrelated topic.",
             "- Aim for the upper half of the accepted range, not the minimum.",
             "- Before finishing, check: does this reach at least the minimum word count? If not, add detail rather than stopping early.",
             retry_note,
         ]
     ).strip()
-
 
 def _research_summary_for_prompt(context: Any) -> str:
     lines = [

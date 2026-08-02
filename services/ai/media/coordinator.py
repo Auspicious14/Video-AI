@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import List, Tuple, Optional
+# pyrefly: ignore [missing-import]
 from PIL import Image, ImageDraw
 
 from config import OUTPUT_DIR

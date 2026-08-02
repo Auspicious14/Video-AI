@@ -12,7 +12,9 @@ KEY CONCEPTS
 {key_concepts}
 
 Return valid JSON with exactly these top-level fields:
+
 - concepts: array of objects with concept, image_prompt, text_overlay, curiosity, clarity, readability, mobile_visibility, emotional_impact
+- text_overlay: a single short string, not a list — combine multiple text elements into one line separated by a symbol like • or |
 - best_index: integer
 
 Scores are 0 to 10. Concepts should be readable on mobile, emotionally clear, and truthful. Avoid misleading clickbait and tiny text.

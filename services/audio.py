@@ -31,6 +31,7 @@ The pipeline uses this to redistribute scene timing (Part 3).
 """
 
 from __future__ import annotations
+from services import motion_brief
 import re
 import json
 import logging
@@ -61,8 +62,11 @@ VOICE_REGISTRY: dict[str, str] = {
 
 DEFAULT_KOKORO_VOICE = "am_adam"
 
-_YEAR_PATTERN = re.compile(r'\b(1[0-9]{3}|20[0-9]{2})\b')
-
+_COMMA_NUMBER_PATTERN = re.compile(r'\b(\d{1,3}(?:,\d{3})+)\b')
+_DECIMAL_SCALE_PATTERN = re.compile(r'\b(\d+)\.(\d+)\s+(billion|million|trillion|thousand)\b', re.IGNORECASE)
+_DECADE_2000s = re.compile(r'\b200([0-9])\b')
+_YEAR_PATTERN = re.compile(r'\b(1[0-9]{3}|20[1-9][0-9])\b')  # excludes 2000-2009, handled separately above
+_DIGIT_WORDS = {"0":"","1":"one","2":"two","3":"three","4":"four","5":"five","6":"six","7":"seven","8":"eight","9":"nine"}
 
 # ── Provider protocol ─────────────────────────────────────────────────────────
 
@@ -92,6 +96,7 @@ class KokoroProvider:
 
     def _init(self) -> None:
         try:
+            # pyrefly: ignore [missing-import]
             from pykokoro import KokoroPipeline, PipelineConfig
             self._pipeline = KokoroPipeline(PipelineConfig(voice=DEFAULT_KOKORO_VOICE))
             self._current_voice = DEFAULT_KOKORO_VOICE
@@ -110,6 +115,7 @@ class KokoroProvider:
         if self._current_voice == resolved:
             return
         try:
+            # pyrefly: ignore [missing-import]
             from pykokoro import KokoroPipeline, PipelineConfig
             self._pipeline = KokoroPipeline(PipelineConfig(voice=resolved))
             self._current_voice = resolved
@@ -122,6 +128,7 @@ class KokoroProvider:
             raise RuntimeError("Kokoro not available")
 
         import numpy as np
+        # pyrefly: ignore [missing-import]
         import soundfile as sf
 
         if voice_id:
@@ -156,6 +163,7 @@ class GTTSProvider:
     name = "gtts"
 
     async def generate(self, narration: str, job_id: str, voice_id: Optional[str] = None) -> Path:
+        # pyrefly: ignore [missing-import]
         from gtts import gTTS
 
         mp3_path = OUTPUT_DIR / f"{job_id}_audio.mp3"
@@ -176,6 +184,7 @@ class OpenAITTSProvider:
     name = "openai"
 
     async def generate(self, narration: str, job_id: str, voice_id: Optional[str] = None) -> Path:
+        # pyrefly: ignore [missing-import]
         import openai
 
         api_key = os.getenv("OPENAI_API_KEY", "")
@@ -369,6 +378,7 @@ def _log_ffprobe_failure(
 
     # Try to get more info from soundfile to populate the diagnostics
     try:
+        # pyrefly: ignore [missing-import]
         import soundfile as sf
         info = sf.info(str(audio_path))
         logger.error(
@@ -393,6 +403,7 @@ def _soundfile_duration(audio_path: Path) -> float:
     # WAV / FLAC / OGG — soundfile handles these natively
     if suffix in {".wav", ".flac", ".ogg", ".aiff"}:
         try:
+            # pyrefly: ignore [missing-import]
             import soundfile as sf
             info = sf.info(str(audio_path))
             duration = info.duration
@@ -407,6 +418,7 @@ def _soundfile_duration(audio_path: Path) -> float:
     # MP3 — mutagen handles these
     if suffix == ".mp3":
         try:
+            # pyrefly: ignore [missing-import]
             from mutagen.mp3 import MP3
             audio = MP3(str(audio_path))
             duration = audio.info.length
@@ -469,3 +481,17 @@ def _normalize_years_for_tts(text: str) -> str:
     this range (e.g. '1500 species' becomes 'fifteen hundred' too) — a
     reasonable trade for how often years appear in documentary narration."""
     return _YEAR_PATTERN.sub(lambda m: f"{m.group(0)[:2]} {m.group(0)[2:]}", text)
+
+
+
+
+
+def _normalize_numbers_for_tts(text: str) -> str:
+    text = _COMMA_NUMBER_PATTERN.sub(lambda m: m.group(0).replace(",", ""), text)
+    text = _DECIMAL_SCALE_PATTERN.sub(lambda m: f"{m.group(1)} point {m.group(2)} {m.group(3)}", text)
+    text = _DECADE_2000s.sub(
+        lambda m: "two thousand" + (f" and {_DIGIT_WORDS[m.group(1)]}" if m.group(1) != "0" else ""),
+        text,
+    )
+    text = _YEAR_PATTERN.sub(lambda m: f"{m.group(0)[:2]} {m.group(0)[2:]}", text)
+    return text

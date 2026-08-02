@@ -17,7 +17,7 @@ Token optimization:
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
-
+import re as _re
 from services.ai.research import research_to_context, research_to_summary
 from services.ai.schemas import (
     AssetCollectionResult,
@@ -375,6 +375,27 @@ def build_seo_context(
     )
 
 
+def _split_sentences(text: str) -> list[str]:
+    return [s for s in _re.split(r'(?<=[.!?])\s+', text.strip()) if s]
+
+def _build_sentence_timings(full_narration: str, section_metadata: list) -> list[dict]:
+    words = full_narration.split()
+    cursor = 0
+    timings: list[dict] = []
+    for section in section_metadata:
+        n = section.actual_word_count
+        section_text = " ".join(words[cursor:cursor + n])
+        cursor += n
+        sentences = _split_sentences(section_text)
+        wcs = [max(1, len(s.split())) for s in sentences]
+        total = sum(wcs) or 1
+        t = section.start_time_seconds
+        for sentence, wc in zip(sentences, wcs):
+            share = section.duration_seconds * (wc / total)
+            timings.append({"text": sentence, "start_seconds": round(t, 2), "end_seconds": round(t + share, 2)})
+            t += share
+    return timings
+
 def build_visual_planning_context(
     script_qa: ScriptQAResult,
     target_duration: int,
@@ -392,13 +413,18 @@ def build_visual_planning_context(
                 "word_count": s.actual_word_count,
             })
 
+    sentence_timings = _build_sentence_timings(script.narration, script.section_metadata) if script.section_metadata else []
+    
     return VisualPlanningContext(
-        narration=script.narration,
+        narration=script.narration, 
         sections=script.sections,
-        section_timings=section_timings,
-        target_duration=target_duration,
-        aspect_ratio=aspect_ratio,
+        section_timings=section_timings, 
+        sentence_timings=sentence_timings,
+        target_duration=target_duration, 
+        aspect_ratio=aspect_ratio
     )
+
+    
 
 def build_image_generation_context(
     visual_plan: VisualPlanResult,

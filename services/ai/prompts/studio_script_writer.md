@@ -17,6 +17,7 @@ STORY CONTEXT
 {length_repair_instruction}
 
 Return valid JSON with exactly these top-level fields:
+
 - hook: string (15-25 words)
 - narration: string (MUST be {min_words}-{max_words} words total)
 - sections: array of strings (section titles that structure the narration)
@@ -33,11 +34,10 @@ CRITICAL NARRATION REQUIREMENTS:
 
 2. DOCUMENTARY STORYTELLING DEPTH
    Study how professional documentary channels (ColdFusion, MagnatesMedia, Wendover) structure narration:
-   
    - SETUP: Establish context and stakes (10-15% of narration)
    - EXPLORATION: Develop key points with evidence, examples, and details (60-70% of narration)
    - RESOLUTION: Connect insights and provide perspective (15-20% of narration)
-   
+
    For each turning point in the story architecture:
    - Explain the background and context
    - Present specific evidence and examples from research
@@ -67,15 +67,15 @@ CRITICAL NARRATION REQUIREMENTS:
    - Unsupported claims, speculation presented as fact
    - Padding with repetitive statements
    - Generic summaries that lack depth
-   
 6. FACTUAL ACCURACY
    - Use only facts provided in the research context
    - Maintain factual humility when evidence is limited
    - Cite sources in source_notes array
 
 VERIFICATION BEFORE RETURNING:
+
 - Count your narration words (split on whitespace)
 - If word count is below {min_words}, the narration is incomplete - expand sections with research details
-- Set estimated_duration_seconds = round(word_count * 60 / 145)
+- Set estimated_duration_seconds = round(word_count \* 60 / 145)
 
 This is a DOCUMENTARY SCRIPT, not a summary. Write the full narration that will be spoken.

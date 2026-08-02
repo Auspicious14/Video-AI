@@ -33,6 +33,11 @@ For every timeline item:
   "In 2008..." then "By 2015..."), they need separate visual beats, even
   if both are broadly about the same subject. One generic beat should
   never cover multiple distinct narration points.
+- generation_prompt MUST be equally specific: when sourcing_priority is
+  "ai_only", the prompt must describe the exact thing named in
+  narration_reference — never a generic stand-in scene for the topic
+  overall (e.g. not "children playing with toy bricks" unless the
+  narration is actually describing that specific moment).
 
 Return valid JSON with these top-level fields:
 
@@ -109,6 +114,14 @@ For EVERY scene, ask in this order:
      → asset_type: ai_image
      → sourcing_priority: ai_only
      → generation_prompt: "editorial illustration style, [concept], documentary realism"
+
+NUMERIC CLAIMS REQUIRE CHARTS, NOT GENERIC IMAGERY
+
+Any narration sentence containing a specific number, dollar amount,
+percentage, or statistic (e.g. "$300 million", "over 400 stores") MUST use
+asset_type "chart" or "infographic" with sourcing_priority
+"generated_graphic" for that beat — never a generic photo/video/AI
+illustration that doesn't actually display the number.
 
 VISUAL BEAT REQUIREMENTS:
 

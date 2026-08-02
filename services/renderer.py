@@ -27,6 +27,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional, List, Tuple
+# pyrefly: ignore [missing-import]
 from PIL import Image, ImageDraw, ImageFont
 from config import OUTPUT_DIR
 
@@ -419,9 +420,11 @@ def build_scene_clip(
 
 
 def _normalize_clip(src, dst, duration, fps, width=W, height=H):
-    """Re-encodes a clip to exact W×H @ fps. When source aspect doesn't match
-    the target (e.g. a vertical clip in a 16:9 frame), fills the frame with a
-    blurred, cropped copy of the same footage instead of solid black bars."""
+    """Re-encodes a clip to exact W×H @ fps, looping if the source is shorter
+    than the allocated beat duration. Real stock clips are very often shorter
+    than their assigned beat — without -stream_loop, ffmpeg just ends early
+    once the source runs out, silently truncating that beat (and the whole
+    chained video) well below its planned length."""
     filter_complex = (
         f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
         f"crop={width}:{height},gblur=sigma=20,setsar=1[bg];"
@@ -430,6 +433,7 @@ def _normalize_clip(src, dst, duration, fps, width=W, height=H):
     )
     result = subprocess.run([
         "ffmpeg", "-y",
+        "-stream_loop", "-1",
         "-i", str(src),
         "-filter_complex", filter_complex,
         "-t", str(duration),
@@ -861,4 +865,32 @@ async def render_avatar_video(
                 f"Avatar render failed: {result.stderr.decode()[-600:]}"
             )
 
+    return output_path
+
+def create_fallback_frame(text: str, output_path: Path, width: int, height: int) -> Path:
+    """Solid-background Layer A fallback — guarantees a beat always has
+    something to render, even when every real/AI asset source fails."""
+
+    img = Image.new("RGB", (width, height), (26, 26, 46))
+    draw = ImageDraw.Draw(img)
+    font = _find_font(48)
+    words, lines, current = text.split(), [], []
+    max_w = int(width * 0.8)
+    for word in words:
+        test = " ".join(current + [word])
+        if draw.textlength(test, font=font) > max_w:
+            lines.append(" ".join(current)) if current else lines.append(word)
+            current = [] if current else current
+            if not current:
+                current = [word] if lines and lines[-1] != word else []
+        else:
+            current.append(word)
+    if current:
+        lines.append(" ".join(current))
+    y = (height - len(lines) * 60) // 2
+    for line in lines:
+        w = draw.textlength(line, font=font)
+        draw.text(((width - w) / 2, y), line, font=font, fill=(255, 255, 255))
+        y += 60
+    img.save(output_path)
     return output_path

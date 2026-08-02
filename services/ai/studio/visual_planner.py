@@ -156,16 +156,80 @@ async def run_visual_planning_agent(
     context: VisualPlanningContext,
 ) -> VisualPlanResult:
     """
-    Create the visual timeline before images are generated.
-    
-    Optimized: Receives minimal context (2,000 tokens) instead of full artifacts (5,500 tokens).
-    Token reduction: 64%
-    
-    Note: Narration is required (1,800 tokens) - visual planner must align to spoken words.
+    Create the visual timeline section-by-section instead of one call for
+    the whole video — same fix already proven for narration and research:
+    a single big call truncates as beat count scales with duration. Reuses
+    the section boundaries narration generation already computed.
     """
-    # Token budget: ~100 tokens per beat, ~1 beat per 7s, plus 300 overhead.
-    # Mistral free tier caps at 4096 output; leaving 800 for prompt means
-    # we must stay well under 3200.  Cap at 2600 to be safe across providers.
+    if not context.section_timings:
+        return await _run_visual_planning_single_call(context=context)
+
+    all_beats: list[VisualTimelineItem] = []
+    visual_style = ""
+    consistency_rules: list[str] = []
+    continuity_notes: list[str] = []
+    next_index = 0
+
+    for section in context.section_timings:
+        section_sentences = [
+            t for t in context.sentence_timings
+            if section["start_seconds"] <= t["start_seconds"] < section["end_seconds"]
+        ] or [{
+            "text": section["title"],
+            "start_seconds": section["start_seconds"],
+            "end_seconds": section["end_seconds"],
+        }]
+
+        section_duration = section["end_seconds"] - section["start_seconds"]
+        max_beats = max(1, round(section_duration / 7))
+        token_budget = min(1600, max(500, max_beats * 110 + 250))
+
+        sentences_block = "\n".join(
+            f'  - {t["start_seconds"]:.1f}-{t["end_seconds"]:.1f}s: "{t["text"]}"'
+            for t in section_sentences
+        )
+
+        result = await generate_structured_artifact(
+            prompt_name="studio_visual_planner_section",
+            model=VisualPlanResult,
+            variables={
+                "aspect_ratio": context.aspect_ratio,
+                "section_title": section["title"],
+                "sentences": sentences_block,
+                "max_beats": max_beats,
+                "continuity": "\n".join(f"- {n}" for n in continuity_notes[-2:])
+                    or "- None. This is the opening section.",
+            },
+            temperature=0.42,
+            max_tokens=token_budget,
+        )
+
+        for item in result.timeline:
+            item.index = next_index
+            next_index += 1
+            all_beats.append(item)
+
+        if result.visual_style and not visual_style:
+            visual_style = result.visual_style
+        for rule in result.consistency_rules:
+            if rule not in consistency_rules:
+                consistency_rules.append(rule)
+        if result.timeline:
+            continuity_notes.append(f"{section['title']}: {result.timeline[-1].on_screen}")
+
+    merged = VisualPlanResult(
+        visual_style=visual_style or "documentary realism",
+        consistency_rules=consistency_rules or ["Prioritize real footage over AI-generated visuals"],
+        timeline=all_beats,
+    )
+    return _validate_and_repair_timeline_duration(merged, context.target_duration)
+
+
+async def _run_visual_planning_single_call(
+    *,
+    context: VisualPlanningContext,
+) -> VisualPlanResult:
+    """Fallback for scripts without section_metadata (older narration path)."""
     max_beats = max(5, context.target_duration // 7)
     token_budget = min(2600, max(900, max_beats * 110 + 300))
 
@@ -177,23 +241,12 @@ async def run_visual_planning_agent(
             "aspect_ratio": context.aspect_ratio,
             "narration": context.narration,
             "max_beats": max_beats,
-            "sections": (
-                "\n".join(
-                    f"  - {t['start_seconds']:.1f}-{t['end_seconds']:.1f}s "
-                    f"[{t['title']}, ~{t['word_count']} words]"
-                    for t in context.section_timings
-                )
-                if context.section_timings
-                else "\n".join(f"  - {section}" for section in context.sections)
-            ),
+            "sections": "\n".join(f"  - {section}" for section in context.sections),
         },
         temperature=0.42,
         max_tokens=token_budget,
     )
-    
-    # Validate and repair timeline duration alignment
     return _validate_and_repair_timeline_duration(result, context.target_duration)
-
 
 async def run_image_generation_planner_agent(
     *,

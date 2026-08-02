@@ -1,9 +1,7 @@
 """Stage 7: real asset collection before AI generation."""
-
 from __future__ import annotations
-
+from typing_inspection import introspection
 import logging
-
 from services.ai.media.asset_types import AssetKind
 from services.ai.media.visual_intent import CameraMotion, Emotion, ShotType, SubjectType, VisualIntent
 from services.ai.schemas import (
@@ -338,36 +336,39 @@ async def run_asset_collection_service(
             ranked = sorted(candidates, key=_asset_ranking_score, reverse=True)
             best = next(
                 (c for c in ranked if (c.provider, c.provider_id) not in used_asset_keys),
-                ranked[0],  # every candidate already used — reuse the best rather than skip the beat
+                ranked[0],
             )
-            used_asset_keys.add((best.provider, best.provider_id))
-            
-            # Log selected candidate
-            logger.info(
-                f"[AssetCollection] Visual {item.index}.{spec.asset_index}: "
-                f"Selected {best.kind.value} from {best.provider} "
-                f"(ranking_score={_asset_ranking_score(best):.1f}, "
-                f"quality={best.quality:.2f}, relevance={best.relevance:.2f})"
-            )
-            
-            # Calculate suitability score (must be 0-10 for schema)
             suitability = _calculate_suitability_score(best)
-            
-            # Validate range before creating AssetCandidate
+
+            MIN_SUITABILITY_SCORE = 5.5
+            if suitability < MIN_SUITABILITY_SCORE:
+                logger.warning(
+                    f"[AssetCollection] Visual {item.index}.{spec.asset_index}: "
+                    f"best match scored {suitability:.1f} (below {MIN_SUITABILITY_SCORE}) — "
+                    f"rejecting, using AI generation instead."
+                )
+                ai_required.append(item.index)
+                issues.append(
+                    QualityIssue(
+                        severity="low",
+                        stage="asset_collection",
+                        issue=f"Best real asset for visual {item.index}.{spec.asset_index} scored too low ({suitability:.1f}/10).",
+                        recommendation="AI generation used instead of a weak/off-topic real asset match.",
+                    )
+                )
+                continue
+
+            used_asset_keys.add((best.provider, best.provider_id))
             assert 0.0 <= suitability <= 10.0, (
                 f"suitability_score out of range: {suitability:.2f} "
                 f"(base={best.score}, cred={best.credibility}, rel={best.relevance})"
             )
-            
+
             selected.append(
                 AssetCandidate(
-                    visual_index=item.index,
-                    asset_index=spec.asset_index,
-                    source=best.provider,
-                    asset_type=best.kind.value,
-                    url=best.url,
-                    license=best.licensing,
-                    credit=best.author or best.title,
+                    visual_index=item.index, asset_index=spec.asset_index,
+                    source=best.provider, asset_type=best.kind.value, url=best.url,
+                    license=best.licensing, credit=best.author or best.title,
                     suitability_score=round(suitability, 2),
                     notes=best.description or best.title or spec.reason,
                 )

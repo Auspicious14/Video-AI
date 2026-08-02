@@ -119,13 +119,13 @@ class PixabayProvider(MediaProvider):
                         description=description,
                         preview_url=preview,
                         author=author,
-                        relevance=0.85,
-                        quality=0.85,
+                        relevance=0.90,
+                        quality=0.90,
                         width=width,
                         height=height,
                         aspect_ratio=aspect,
-                        freshness=0.80,
-                        credibility=0.80,
+                        freshness=0.90,
+                        credibility=0.85,
                         licensing="pixabay_free",
                     )
                 )

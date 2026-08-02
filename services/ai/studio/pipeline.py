@@ -1,11 +1,10 @@
 """End-to-end AI-first YouTube production studio pipeline."""
 
 from __future__ import annotations
-
+from pydantic import warnings
 import logging
 from pathlib import Path
 from typing import Any
-
 from config import OUTPUT_DIR
 from models import YouTubeStudioRequest
 from services.ai.research import PLATFORM_YT_LONG, run_research
@@ -54,8 +53,8 @@ from services.ai.studio.visual_planner import (
 )
 from services.ai.studio.voice_director import run_audio_qa, run_voice_direction_agent
 from services.audio import generate_audio, get_audio_duration
-
 import store
+from services.thumbnail import render_thumbnail_for_job
 
 logger = logging.getLogger(__name__)
 
@@ -198,20 +197,29 @@ async def _render_studio_video(
                 logger.info(f"[Renderer] Visual {item.index}: Generated AI fallback image")
             except Exception as exc:  # noqa: BLE001
                 if last_frame is None:
-                    warnings.append(f"Could not generate first render frame {item.index}: {exc}")
-                    logger.error(f"[Renderer] Visual {item.index}: AI generation failed and no previous frame: {exc}")
-                    continue
-                warnings.append(f"Reused previous frame because visual {item.index} failed to generate: {exc}")
-                logger.warning(f"[Renderer] Visual {item.index}: Reusing previous frame due to generation failure")
-                frame_path = last_frame
-                is_video = last_frame_is_video  # carry over the type of whatever we're reusing
+                    warnings.append(f"Used deterministic fallback for visual {item.index}: {exc}")
+                    logger.warning(f"[Renderer] Visual {item.index}: no prior frame — using deterministic fallback")
+                    from services.renderer import create_fallback_frame
+                    frame_path = create_fallback_frame(
+                        item.on_screen or "…",
+                        OUTPUT_DIR / f"{job_id}_fallback_{item.index}.png",
+                        width, height,
+                    )
+                    is_video = False
 
         duration = round(raw_duration * scale, 3)
         image_paths.append((frame_path, duration))
         ai_clip_paths.append(frame_path if is_video else None)
         last_frame = frame_path
         last_frame_is_video = is_video
-
+    # in _render_studio_video, right before "if not image_paths: raise ..."
+    total_planned = sum(d for _, d in image_paths)
+    if total_planned < actual_duration * 0.95:
+        logger.error(
+            f"[Renderer] Planned visual duration ({total_planned:.1f}s) is significantly "
+            f"short of narration duration ({actual_duration:.1f}s) — video will be shorter "
+            f"than the audio. Warnings so far: {warnings}"
+        )
     if not image_paths:
         raise RuntimeError("No local or generated visual frames are available for studio render.")
 
@@ -569,6 +577,13 @@ async def run_youtube_studio_production(job_id: str, req: YouTubeStudioRequest) 
                 context=build_thumbnail_context(research=research, script_qa=script_qa)
             ),
         )
+
+        thumbnail_path = await render_thumbnail_for_job(
+            job_id=job_id, topic=topic, thumbnails=thumbnails, output_dir=OUTPUT_DIR,
+        )
+        if thumbnail_path:
+            store.update_job(job_id, thumbnail_url=f"/outputs/{thumbnail_path.name}")
+
         titles = await get_or_create_artifact(
             stage="title_strategy",
             payload={"research": research.model_dump(mode="json"), "script_qa": script_qa.model_dump(mode="json")},
@@ -577,6 +592,7 @@ async def run_youtube_studio_production(job_id: str, req: YouTubeStudioRequest) 
                 context=build_title_context(research=research, script_qa=script_qa)
             ),
         )
+
         seo = await get_or_create_artifact(
             stage="youtube_seo",
             payload={

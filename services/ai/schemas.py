@@ -285,7 +285,40 @@ class AudienceInsights(BaseModel):
     emotional_triggers:  list[str] = Field(default_factory=list)
     cultural_context:    str       = Field(default="", description="Cultural nuances relevant to the intended audience.")
 
+class ResearchCoreFacts(BaseModel):
+    """Module 1: the factual foundation. Merged into ResearchResult."""
+    model_config = _EXTRA_ALLOW
 
+    executive_summary: str = Field(..., description="3-5 sentence overview — factual, no hype.")
+    key_facts:         list[str] = Field(default_factory=list)
+    timeline:          list[str] = Field(default_factory=list)
+    surprising_facts:  list[str] = Field(default_factory=list)
+    misconceptions:    list[str] = Field(default_factory=list)
+    interesting_stats: list[str] = Field(default_factory=list)
+    content_warnings:  list[str] = Field(default_factory=list)
+
+
+class ResearchEngagement(BaseModel):
+    """Module 2: hooks and storytelling framing. Merged into ResearchResult."""
+    model_config = _EXTRA_ALLOW
+
+    emotional_angles:      list[EmotionalAngle]  = Field(default_factory=list)
+    hook_opportunities:    list[HookOpportunity] = Field(default_factory=list)
+    suggested_hook_angles: list[str]             = Field(default_factory=list)
+    content_angles:        ContentAngles         = Field(default_factory=ContentAngles)
+
+
+class ResearchVisualContext(BaseModel):
+    """Module 3: visual sourcing, sources, risk, audience. Merged into ResearchResult."""
+    model_config = _EXTRA_ALLOW
+
+    visual_opportunities: list[VisualOpportunity] = Field(default_factory=list)
+    search_keywords:      list[str]               = Field(default_factory=list)
+    related_topics:       list[RelatedTopic]       = Field(default_factory=list)
+    reliable_sources:     list[ReliableSource]     = Field(default_factory=list)
+    risk_flags:           list[RiskFlag]           = Field(default_factory=list)
+    audience_insights:    AudienceInsights         = Field(default_factory=AudienceInsights)
+    
 # ── Core ResearchResult model ─────────────────────────────────────────────────
 
 class ResearchResult(BaseModel):
@@ -1123,12 +1156,19 @@ class EditingPlanResult(BaseModel):
     def repair_timeline_indices(cls, raw: Any) -> Any:
         return VisualPlanResult.repair_timeline_indices(raw)
 
+class EditingPlanGeneration(BaseModel):
+    """What the editing agent actually needs to invent — never the timeline,
+    which already exists correctly from visual planning and would otherwise
+    be regenerated at real token cost for no reason."""
+    model_config = _EXTRA_ALLOW
+    fps: int = 30
+    music_direction: str = ""
+    caption_style: str = ""
+    transitions: list[str] = Field(default_factory=list)
 
 class ScoredThumbnailConcept(BaseModel):
     """Stage 12: thumbnail concept with production scoring."""
-
     model_config = _EXTRA_ALLOW
-
     concept: str
     image_prompt: str
     text_overlay: str = ""
@@ -1137,6 +1177,17 @@ class ScoredThumbnailConcept(BaseModel):
     readability: float = Field(default=0.0, ge=0.0, le=10.0)
     mobile_visibility: float = Field(default=0.0, ge=0.0, le=10.0)
     emotional_impact: float = Field(default=0.0, ge=0.0, le=10.0)
+
+    @field_validator("text_overlay", mode="before")
+    @classmethod
+    def coerce_text_overlay(cls, v: Any) -> str:
+        """Models sometimes describe a thumbnail's multiple text elements
+        (date, role, milestone) as a list of short phrases instead of one
+        string — join them into the single line this field expects rather
+        than reject a reasonable answer in the wrong shape."""
+        if isinstance(v, list):
+            return " | ".join(str(item) for item in v if item)
+        return v if isinstance(v, str) else str(v)
 
 
 class ThumbnailStrategyResult(BaseModel):

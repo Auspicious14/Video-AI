@@ -31,7 +31,9 @@ from services.ai.exceptions import AIResponseError, ProviderError, ValidationErr
 from services.ai.providers import ProviderConfig, ProviderName, get_enabled_providers
 
 try:  # Imported at module scope so tests can patch SDK calls directly.
+    # pyrefly: ignore [missing-import]
     from google import genai
+    # pyrefly: ignore [missing-import]
     from google.genai import types as genai_types
 except Exception:  # pragma: no cover - handled at runtime when Gemini is used
     genai = None
@@ -161,6 +163,7 @@ async def _call_groq(
     - output_tokens: output token count  
     - total_tokens: combined count
     """
+    # pyrefly: ignore [missing-import]
     from openai import AsyncOpenAI
     if cfg.name == ProviderName.MISTRAL:
         await _mistral_rate_gate()
@@ -430,6 +433,7 @@ async def _call_provider(
             temperature=temperature,
             max_tokens=max_tokens,
             json_mode=json_mode,
+            # pyrefly: ignore [unexpected-keyword]
             response_schema=response_schema,
         )
     else:
@@ -631,7 +635,14 @@ async def _run_with_failover(
 
     On non-retryable errors (AuthenticationError, bad request), raise
     immediately — failover would not help.
-    
+
+    On a "successful" json_mode response that's actually truncated (some
+    providers return this as a normal 200, not an exception — e.g. Mistral,
+    unlike Groq which raises its own error on malformed JSON), treat it the
+    same as a failure and advance to the next provider, rather than
+    returning garbage that will fail JSON parsing downstream with no
+    provider left to fall back to.
+
     Returns tuple of (content, metadata) where metadata contains:
     - finish_reason: why generation stopped
     - provider: which provider was used
@@ -663,12 +674,12 @@ async def _run_with_failover(
                     response_schema=response_schema,
                 )
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
-                
+
                 # Add provider info and latency to metadata
                 metadata["provider"] = cfg.name.value
                 metadata["model"] = cfg.json_model if json_mode else cfg.model
                 metadata["latency_ms"] = elapsed_ms
-                
+
                 finish_reason = metadata.get("finish_reason", "unknown")
                 metadata["latency_ms"] = elapsed_ms
                 metadata["provider_attempt"] = attempt
@@ -678,12 +689,13 @@ async def _run_with_failover(
                 total_tokens = _safe_int(metadata.get("total_tokens", 0))
                 json_mode_active = metadata.get("json_mode", json_mode)
                 thinking_disabled = metadata.get("thinking_disabled", False)
-                
+
                 # Check for truncation
                 # For Gemini, the limit is on total_tokens, not output_tokens
                 is_gemini = cfg.name == ProviderName.GEMINI
-                
-                if finish_reason in ("MAX_TOKENS", "length", "FinishReason.MAX_TOKENS"):
+                is_truncated = finish_reason in ("MAX_TOKENS", "length", "FinishReason.MAX_TOKENS")
+
+                if is_truncated:
                     if is_gemini:
                         logger.warning(
                             "⚠️  GEMINI TOTAL TOKEN LIMIT | provider=%s model=%s finish_reason=%s\n"
@@ -716,6 +728,23 @@ async def _run_with_failover(
                             prompt_tokens,
                             json_mode_active,
                         )
+
+                    # A truncated JSON response is unusable content wearing a
+                    # "success" costume — some providers (Mistral) don't raise
+                    # an error for this the way Groq does, so without this
+                    # check it would be returned as if it were good, and the
+                    # failover chain would never reach the next provider.
+                    if json_mode:
+                        logger.warning(
+                            "Provider %s returned truncated JSON — not accepting as a "
+                            "successful result, advancing to next provider instead.",
+                            cfg.name.value,
+                        )
+                        last_exc = AIResponseError(
+                            f"{cfg.name.value} returned truncated JSON output (finish_reason={finish_reason})"
+                        )
+                        break  # same prompt/budget won't fix it on this provider — move on
+
                 elif _safe_int(max_tokens) > 0 and _safe_int(output_tokens) > 0:
                     usage_ratio = _safe_int(output_tokens) / _safe_int(max_tokens)
                     if usage_ratio > 0.8:
@@ -736,7 +765,7 @@ async def _run_with_failover(
                     safe_output = _safe_int(output_tokens)
                     safe_prompt = _safe_int(prompt_tokens)
                     safe_thoughts = _safe_int(thoughts_tokens)
-                    
+
                     log_parts = [
                         f"✓ AI call succeeded | provider={cfg.name.value} model={metadata['model']} mode={'json' if json_mode else 'text'} latency_ms={elapsed_ms}",
                         f"finish_reason={finish_reason} tokens={safe_output}/{max_tokens} ({token_usage_pct:.1f}%) prompt={safe_prompt}"
@@ -744,8 +773,9 @@ async def _run_with_failover(
                     if is_gemini:
                         log_parts.append(f"thoughts={safe_thoughts} thinking_disabled={thinking_disabled}")
                     logger.info(" ".join(log_parts))
-                
-                return result, metadata
+
+                if not (is_truncated and json_mode):
+                    return result, metadata
 
             except Exception as exc:  # noqa: BLE001
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
