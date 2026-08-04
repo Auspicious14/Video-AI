@@ -1,6 +1,7 @@
 """End-to-end AI-first YouTube production studio pipeline."""
 
 from __future__ import annotations
+from services.ai.studio import script_qa
 from pydantic import warnings
 import logging
 from pathlib import Path
@@ -116,6 +117,7 @@ async def _render_studio_video(
     audio_path: Path,
     actual_duration: float,
     generated_images: list[dict[str, Any]],
+    thumbnail_path: Path | None = None,  
 ) -> tuple[Path, list[str]]:
     """Render a YouTube Studio production using local or generated timeline frames."""
     from services.images import get_image_client
@@ -222,6 +224,20 @@ async def _render_studio_video(
         )
     if not image_paths:
         raise RuntimeError("No local or generated visual frames are available for studio render.")
+    if thumbnail_path and thumbnail_path.exists():
+        THUMBNAIL_DURATION = 1.0
+
+    if thumbnail_path and thumbnail_path.exists():
+        image_paths.insert(0, (thumbnail_path, THUMBNAIL_DURATION))
+        ai_clip_paths.insert(0, None)
+
+        actual_duration += THUMBNAIL_DURATION
+
+        logger.info(
+            "[Renderer] Added thumbnail intro (%.1fs): %s",
+            THUMBNAIL_DURATION,
+            thumbnail_path.name,
+        )
 
     script_meta = {
         "hook": script_qa.revised_script.hook,
@@ -678,6 +694,7 @@ async def run_youtube_studio_production(job_id: str, req: YouTubeStudioRequest) 
                         audio_path=audio_path,
                         actual_duration=audio_qa.duration_seconds if audio_qa else target_duration,
                         generated_images=all_visual_assets,  # Now includes both downloaded and generated
+                        thumbnail_path=thumbnail_path,
                     )
                     video_url = f"/outputs/{video_path.name}"
                     warnings.extend(render_warnings)

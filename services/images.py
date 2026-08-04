@@ -326,6 +326,9 @@ import requests
 from pathlib import Path
 from typing import Optional
 from config import OUTPUT_DIR, FAL_KEY, PIXAZO_API_KEY
+# pyrefly: ignore [missing-import]
+from PIL import Image as PILImage
+
 
 logger = logging.getLogger(__name__)
 
@@ -439,13 +442,28 @@ def _poll_pixazo_klein(request_id: str) -> str:
 
 
 def _download_and_save(image_url: str, output_path: str, width: int, height: int) -> str:
-    """Download image from URL, resize to exact dimensions, save as JPEG."""
-    from PIL import Image as PILImage
 
     resp = requests.get(image_url, timeout=30)
     resp.raise_for_status()
 
-    img = PILImage.open(io.BytesIO(resp.content))
+    img = PILImage.open(io.BytesIO(resp.content)).convert("RGB")
+
+    # Crop to target aspect ratio BEFORE resizing — a plain .resize() call
+    # stretches the image to fit exactly, distorting faces/objects whenever
+    # the source size (e.g. Pixazo's snapped 1280x768) doesn't match the
+    # requested one (1280x720). Crop first, then resize preserves proportions.
+    target_ratio = width / height
+    src_ratio = img.width / img.height
+    if abs(src_ratio - target_ratio) > 0.01:
+        if src_ratio > target_ratio:
+            new_w = round(img.height * target_ratio)
+            left = (img.width - new_w) // 2
+            img = img.crop((left, 0, left + new_w, img.height))
+        else:
+            new_h = round(img.width / target_ratio)
+            top = (img.height - new_h) // 2
+            img = img.crop((0, top, img.width, top + new_h))
+
     if img.size != (width, height):
         img = img.resize((width, height), PILImage.LANCZOS)
 
@@ -572,6 +590,7 @@ class ImageGenerationClient:
         if not self.fal_key:
             raise ValueError("FAL_KEY not set")
 
+        # pyrefly: ignore [missing-import]
         import fal_client
 
         logger.info(f"[fal.ai FLUX.1-dev] Generating: {prompt[:60]}…")
@@ -595,26 +614,31 @@ class ImageGenerationClient:
     # ── Core public method ────────────────────────────────────────────────────
 
     async def generate_image(
-        self,
-        prompt: str,
-        output_path: str,
-        width: int = 1080,
-        height: int = 1920,
-        scene_context: str = "",
-        health_mode: bool = False,
+    self,
+    prompt: str,
+    output_path: str,
+    width: int = 1080,
+    height: int = 1920,
+    scene_context: str = "",
+    health_mode: bool = False,
+    tier: str = "fast",  # "fast" = free/cheap first, for high-volume in-video visuals
+                          # "quality" = real models first, for low-volume hero shots (thumbnails)
     ) -> str:
-        """
-        Generate a single image using the provider waterfall:
-        Pixazo Schnell Free → Pixazo Klein → fal.ai
-        """
         enhanced = enhance_prompt(prompt, scene_context=scene_context, health_mode=health_mode)
         errors = []
 
-        for name, fn in [
+        fast_order = [
             ("Pixazo Schnell Free", lambda: self._generate_pixazo_schnell(enhanced, output_path, width, height)),
             ("Pixazo Flux 2 Klein", lambda: self._generate_pixazo_klein(enhanced, output_path, width, height)),
-            ("fal.ai",             lambda: self._generate_fal(enhanced, output_path, width, height)),
-        ]:
+            ("fal.ai", lambda: self._generate_fal(enhanced, output_path, width, height)),
+        ]
+        quality_order = [
+            ("Pixazo Flux 2 Klein", lambda: self._generate_pixazo_klein(enhanced, output_path, width, height)),
+            ("fal.ai", lambda: self._generate_fal(enhanced, output_path, width, height)),
+            ("Pixazo Schnell Free", lambda: self._generate_pixazo_schnell(enhanced, output_path, width, height)),
+        ]
+
+        for name, fn in (quality_order if tier == "quality" else fast_order):
             try:
                 return fn()
             except Exception as e:

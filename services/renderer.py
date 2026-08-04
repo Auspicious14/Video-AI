@@ -481,6 +481,11 @@ def build_final_video(
     # 2. Text overlays
     hook_overlay = tmp / "hook.png"
     cta_overlay  = tmp / "cta.png"
+
+    hook_words = hook_text.split()
+    if len(hook_words) > 20:
+        hook_text = " ".join(hook_words[:20]) + "…"
+
     create_text_overlay(
         hook_text, hook_overlay,
         font_size=max(34, int(width * 0.037)),

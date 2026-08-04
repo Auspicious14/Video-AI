@@ -1,9 +1,9 @@
 """Stage 3: story architecture specialist."""
 
 from __future__ import annotations
-
+from services.ai import research_to_summary
+from services.ai import research_hooks_summary
 import logging
-
 from services.ai.exceptions import ValidationError
 from services.ai.schemas import ResearchResult, StoryArchitectureResult, TopicIntelligenceResult
 from services.ai.studio.agent_utils import generate_structured_artifact
@@ -28,7 +28,8 @@ async def run_story_architect_agent(
             model=StoryArchitectureResult,
             variables={
                 "topic_brief": topic_brief_context(brief),
-                "research_context": research_brief_context(research, rich=False),
+                "engagement_context": research_hooks_summary(research),
+                "core_context": research_to_summary(research),
                 "target_duration": duration,
             },
             temperature=0.42,
@@ -92,3 +93,46 @@ def _fallback_story_architecture(
             "Act 3: Resolve the central conflict with a nuanced answer",
         ],
     )
+
+
+def story_architecture_context(story: StoryArchitectureResult) -> str:
+    lines = [
+        f"OPENING HOOK:",
+        story.opening_hook,
+        "",
+        f"CENTRAL QUESTION:",
+        story.central_question,
+        "",
+        f"CENTRAL CONFLICT:",
+        story.central_conflict,
+        "",
+    ]
+
+    for i, act in enumerate(story.acts, start=1):
+        lines.extend([
+            f"ACT {i}: {act.title}",
+            f"Purpose: {act.purpose}",
+            f"Story Goal: {act.story_goal}",
+            "Key Points:",
+            *[f"- {p}" for p in act.key_points],
+            "",
+        ])
+
+    lines.extend([
+        "KEY TURNING POINTS:",
+        *[f"- {x}" for x in story.key_turning_points],
+        "",
+        f"CLIMAX:",
+        story.climax,
+        "",
+        f"CONCLUSION:",
+        story.conclusion,
+        "",
+        "EMOTIONAL PROGRESSION:",
+        *[f"- {x}" for x in story.emotional_progression],
+        "",
+        "PACING NOTES:",
+        *[f"- {x}" for x in story.pacing_notes],
+    ])
+
+    return "\n".join(lines)

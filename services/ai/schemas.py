@@ -43,6 +43,15 @@ _EXTRA_ALLOW = ConfigDict(extra="allow")   # forward-compatible: new fields neve
 EmotionType = Literal["urgent", "hopeful", "informative", "empathetic", "inspiring"]
 _VALID_EMOTIONS: set[str] = {"urgent", "hopeful", "informative", "empathetic", "inspiring"}
 
+def _coerce_str_or_join(v: Any, sep: str = " ") -> str:
+    """Shared coercion for fields where a model sometimes reasonably
+    returns a list of phrases instead of one string (a beat's on-screen
+    description changing over its duration, motion changing mid-shot, a
+    thumbnail's multiple text elements). Joins rather than rejects a
+    well-formed-but-wrong-shape answer."""
+    if isinstance(v, list):
+        return sep.join(str(item) for item in v if item)
+    return v if isinstance(v, str) else str(v)
 
 class Scene(BaseModel):
     """A single scene within a video script."""
@@ -530,15 +539,22 @@ class StoryArchitectureResult(BaseModel):
     """Stage 3: story shape before narration is written."""
 
     model_config = _EXTRA_ALLOW
-
     opening_hook: str
+    central_question: str
     central_conflict: str
+    acts: list[StoryAct]
     key_turning_points: list[str] = Field(default_factory=list)
     climax: str
     conclusion: str
     emotional_progression: list[str] = Field(default_factory=list)
-    pacing: list[str] = Field(default_factory=list)
-    act_structure: list[str] = Field(default_factory=list)
+    pacing_notes: list[str] = Field(default_factory=list)
+
+
+class StoryAct(BaseModel):
+    title: str
+    purpose: str
+    story_goal: str
+    key_points: list[str]
 
 
 class NarrationSectionMeta(BaseModel):
@@ -915,6 +931,22 @@ class VisualTimelineItem(BaseModel):
     motion_direction: str = "slow cinematic push-in"
     reason: str = ""
     assets: list[VisualAssetSpec] = Field(default_factory=list)
+
+    @field_validator("motion_direction", mode="before")
+    @classmethod
+    def coerce_motion_direction(cls, v: Any) -> str:
+        """Models sometimes describe motion changing partway through a
+        longer beat as a list of directional phrases instead of one string
+        — join them into a single description rather than reject a
+        reasonable answer in the wrong shape."""
+        if isinstance(v, list):
+            return " then ".join(str(item) for item in v if item)
+        return v if isinstance(v, str) else str(v)
+
+    @field_validator("on_screen", mode="before")
+    @classmethod
+    def coerce_on_screen(cls, v: Any) -> str:
+        return _coerce_str_or_join(v)
 
     @model_validator(mode="before")
     @classmethod

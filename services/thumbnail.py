@@ -2,6 +2,7 @@
 distinct from in-video text overlays. Separate 1280x720 image, uploaded
 independently on YouTube — never part of the rendered video itself."""
 
+from click import prompt
 from services.ai.schemas import ThumbnailStrategyResult
 from pathlib import Path
 # pyrefly: ignore [missing-import]
@@ -125,10 +126,14 @@ def create_thumbnail(
     draw = ImageDraw.Draw(img)
     words = text.split()
 
-    if len(words) > 5:
-        words = words[:5]
+    for sep in ("|", "•", "—", "-"):
+        if sep in text:
+            text = text.split(sep)[0].strip()
+            break
+    words = text.split()
+    if len(words) > 6:
+        text = " ".join(words[:6])
 
-    text = " ".join(words)
     font_size = 92
     font = _find_font(font_size)
     max_width = int(width * 0.42)
@@ -171,65 +176,108 @@ def create_thumbnail(
     )
     return output_path
 
+
 async def render_thumbnail_for_job(
     *,
     job_id: str,
     topic: str,
-    thumbnails: ThumbnailStrategyResult,
+    thumbnails: "ThumbnailStrategyResult",
     output_dir: Path,
 ) -> Path | None:
     """
-    Turns the best scored thumbnail concept into an actual clickable
-    1280x720 thumbnail — real photo first (same asset pipeline used for
-    in-video visuals), AI-generated as fallback. Same "real asset first"
-    philosophy as everywhere else in this system, not a new paradigm.
+    AI generation from the scored image_prompt is PRIMARY. Real stock photo
+    search was pulling topically-wrong images (e.g. a 2020 crash photo for
+    a 2008 video) because stock libraries mislabel financial/news imagery,
+    and such photos often have real headline text baked into the source
+    image — clashing with the intentional text_overlay. Real-photo search
+    is now fallback-only, used solely if AI generation fails outright.
     """
     if not thumbnails.concepts:
         return None
     best = thumbnails.concepts[thumbnails.best_index]
 
     background_path = output_dir / f"{job_id}_thumb_bg.jpg"
-    used_real_photo = await _try_real_photo_background(topic, best.concept, background_path)
+    generated_ok = False
 
-    if not used_real_photo:
-        from services.images import get_image_client
-        image_client = get_image_client()
-        prompt = f"""
-            Ultra realistic editorial documentary photograph.
+    from services.images import get_image_client
+    image_client = get_image_client()
+    prompt = f"{best.image_prompt}, no text, no words, no captions, no typography, clean photographic composition"
+    try:
+        await image_client.generate_image(
+            prompt=prompt, output_path=str(background_path), width=1280, height=720,
+            tier="quality",
+        )
+        generated_ok = True
+    except Exception as exc:
+        logger.warning(f"[Thumbnail] AI background generation failed: {exc}")
 
-            {best.image_prompt}
-
-            Photorealistic.
-            Professional DSLR.
-            Reuters quality.
-            Getty Images quality.
-            Natural lighting.
-            No text.
-            No watermark.
-            No illustration.
-            No painting.
-            No CGI.
-            Subject fills the right side of the frame.
-            Leave clean negative space on the left for headline.
-            High contrast.
-            Emotionally striking.
-            16:9.
-            """
-        try:
-            await image_client.generate_image(
-                prompt=prompt, output_path=str(background_path), width=1280, height=720,
-            )
-        except Exception as exc:
-            logger.warning(f"[Thumbnail] Background generation failed: {exc}")
+    if not generated_ok:
+        used_real_photo = await _try_real_photo_background(topic, best.concept, background_path)
+        if not used_real_photo:
             return None
 
     output_path = output_dir / f"{job_id}_thumbnail.jpg"
-    overlay_text = best.text_overlay.strip() if best.text_overlay else topic
-    return create_thumbnail(
-    background_path=background_path,
-    text=overlay_text,
-    output_path=output_path,
-)
+    return create_thumbnail(background_path, best.text_overlay or topic, output_path)
+
+# async def render_thumbnail_for_job(
+#     *,
+#     job_id: str,
+#     topic: str,
+#     thumbnails: ThumbnailStrategyResult,
+#     output_dir: Path,
+# ) -> Path | None:
+#     """
+#     Turns the best scored thumbnail concept into an actual clickable
+#     1280x720 thumbnail — real photo first (same asset pipeline used for
+#     in-video visuals), AI-generated as fallback. Same "real asset first"
+#     philosophy as everywhere else in this system, not a new paradigm.
+#     """
+#     if not thumbnails.concepts:
+#         return None
+#     best = thumbnails.concepts[thumbnails.best_index]
+
+#     background_path = output_dir / f"{job_id}_thumb_bg.jpg"
+#     used_real_photo = await _try_real_photo_background(topic, best.concept, background_path)
+
+#     if not used_real_photo:
+#         from services.images import get_image_client
+#         image_client = get_image_client()
+#         prompt = f"""
+#             Ultra realistic editorial documentary photograph.
+
+#             {best.image_prompt}
+
+#             Photorealistic.
+#             Professional DSLR.
+#             Reuters quality.
+#             Getty Images quality.
+#             Natural lighting.
+#             No text.
+#             No watermark.
+#             No illustration.
+#             No painting.
+#             No CGI.
+#             Subject fills the right side of the frame.
+#             Leave clean negative space on the left for headline.
+#             High contrast.
+#             Emotionally striking.
+#             16:9.
+#             """
+#         try:
+#             await image_client.generate_image(
+#                 prompt=prompt, output_path=str(background_path), width=1280, height=720,
+#             )
+#         except Exception as exc:
+#             logger.warning(f"[Thumbnail] Background generation failed: {exc}")
+#             return None
+
+#     output_path = output_dir / f"{job_id}_thumbnail.jpg"
+#     overlay_text = best.text_overlay.strip() if best.text_overlay else topic
+#     return create_thumbnail(
+#     background_path=background_path,
+#     text=overlay_text,
+#     output_path=output_path,
+# )
 
 
 async def _try_real_photo_background(topic: str, concept: str, output_path: Path) -> bool:

@@ -136,7 +136,7 @@ class KokoroProvider:
 
         audio_path = OUTPUT_DIR / f"{job_id}_audio.wav"
 
-        narration = _normalize_years_for_tts(narration)
+        narration = _normalize_numbers_for_tts(narration)
 
         # Generate audio
         res = self._pipeline.run(narration)

@@ -14,10 +14,12 @@ Token optimization benefit:
 """
 
 from __future__ import annotations
+from asyncio import protocols
+from services.ai.studio.story_architect import story_architecture_context
 
 import logging
 from typing import Any
-
+import re
 from services.ai.client import generate_text_with_metadata
 from services.ai.prompts import load_prompt
 from services.ai.schemas import (
@@ -50,6 +52,11 @@ logger = logging.getLogger(__name__)
 
 _TRUNCATED_REASONS = {"MAX_TOKENS", "length", "FinishReason.MAX_TOKENS"}
 
+WORDS_PER_MINUTE = 145
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\S+", text))
 
 async def run_section_based_narration_writer(
     *,
@@ -310,6 +317,9 @@ async def run_documentary_script_writer_agent(
     return combined
 
 
+CHAPTER_TARGET_WORDS = 55  # sized to match what the model reliably lands close to, per tonight's runs
+MAX_CHAPTERS = 14
+
 def _build_narration_section_plan(
     *,
     brief: TopicIntelligenceResult,
@@ -317,71 +327,55 @@ def _build_narration_section_plan(
     story: StoryArchitectureResult,
     target_duration: int,
 ) -> list[NarrationSectionMeta]:
-    """Create the fixed Hook/Intro/3 Chapters/Conclusion/CTA plan."""
+    """
+    Hook/Intro/Conclusion/CTA stay fixed proportions; chapter COUNT scales
+    with duration instead of letting each chapter's word target balloon.
+    Keeping each chapter near the size that's already proven reliable
+    keeps the per-section undershoot small regardless of total length.
+    """
     total_words = target_word_count(target_duration)
-    weights = [0.08, 0.12, 0.22, 0.22, 0.21, 0.10, 0.05]
-    target_words = _distribute_words(total_words, weights)
-    story_beats = [
-        story.opening_hook,
-        story.central_conflict,
-        *story.key_turning_points,
-        story.climax,
-        story.conclusion,
-    ]
-    chapter_points = _split_points(story.key_turning_points or story_beats, 3)
+
+    fixed_fractions = {"hook": 0.08, "intro": 0.12, "conclusion": 0.10, "cta": 0.05}
+    chapter_fraction = 1.0 - sum(fixed_fractions.values())
+    chapter_total_words = round(total_words * chapter_fraction)
+
+    num_chapters = max(3, min(MAX_CHAPTERS, round(chapter_total_words / CHAPTER_TARGET_WORDS)))
+    chapter_words = _distribute_words(chapter_total_words, [1.0 / num_chapters] * num_chapters)
+
+    hook_words = round(total_words * fixed_fractions["hook"])
+    intro_words = round(total_words * fixed_fractions["intro"])
+    conclusion_words = round(total_words * fixed_fractions["conclusion"])
+    cta_words = round(total_words * fixed_fractions["cta"])
+
+    story_beats = [story.opening_hook, story.central_conflict, *story.key_turning_points, story.climax, story.conclusion]
+    chapter_points = _split_points(story.key_turning_points or story_beats, num_chapters)
     cursor = 0.0
 
     specs: list[tuple[str, str, int, list[str], str]] = [
-        (
-            "hook",
-            "Hook",
-            target_words[0],
-            [research.best_hooks[0] if research.best_hooks else story.opening_hook],
-            "urgent",
-        ),
-        (
-            "introduction",
-            "Intro",
-            target_words[1],
-            [story.opening_hook, story.central_conflict],
-            brief.emotional_angle or "informative",
-        ),
-        ("chapter", "Chapter 1", target_words[2], chapter_points[0], "informative"),
-        ("chapter", "Chapter 2", target_words[3], chapter_points[1], "informative"),
-        ("chapter", "Chapter 3", target_words[4], chapter_points[2], "informative"),
-        (
-            "conclusion",
-            "Conclusion",
-            target_words[5],
-            [story.climax, story.conclusion],
-            "inspiring",
-        ),
-        (
-            "cta",
-            "CTA",
-            target_words[6],
-            ["Close with a brief, natural invitation to subscribe or keep watching."],
-            "hopeful",
-        ),
+        ("hook", "Hook", hook_words,
+         [research.best_hooks[0] if research.best_hooks else story.opening_hook], "urgent"),
+        ("introduction", "Intro", intro_words,
+         [story.opening_hook, story.central_conflict], brief.emotional_angle or "informative"),
     ]
+    for i in range(num_chapters):
+        specs.append(("chapter", f"Chapter {i + 1}", chapter_words[i], chapter_points[i], "informative"))
+    specs.append(("conclusion", "Conclusion", conclusion_words, [story.climax, story.conclusion], "inspiring"))
+    specs.append((
+        "cta", "CTA", cta_words,
+        ["Close with a single understated statement that reinforces the throughline of the piece — no direct address to the viewer, no 'subscribe' language."],
+        "hopeful",
+    ))
 
     sections: list[NarrationSectionMeta] = []
     for section_type, title, words, points, tone in specs:
         duration = max(5.0, words * 60 / 145)
-        sections.append(
-            NarrationSectionMeta(
-                section_type=section_type,  # type: ignore[arg-type]
-                title=title,
-                target_word_count=max(1, words),
-                start_time_seconds=round(cursor, 2),
-                duration_seconds=round(duration, 2),
-                key_points=[point for point in points if point],
-                emotional_tone=tone,
-            )
-        )
+        sections.append(NarrationSectionMeta(
+            section_type=section_type, title=title, target_word_count=max(1, words),
+            start_time_seconds=round(cursor, 2), duration_seconds=round(duration, 2),
+            key_points=[point for point in points if point], emotional_tone=tone,
+        ))
         cursor += duration
     return sections
-
 
 def _distribute_words(total_words: int, weights: list[float]) -> list[int]:
     """Round weighted word counts while preserving the exact total."""
@@ -465,16 +459,18 @@ async def _generate_narration_section(
         was_truncated_last = bool(best) and best.finish_reason in _TRUNCATED_REASONS
         temperature = 0.35 if was_truncated_last else (0.58 if attempt == 1 else 0.60)
 
-        text, metadata = await generate_text_with_metadata(
+        last_narration, metadata = await _generate_section_with_validation(
             prompt=prompt,
             system=(
                 "You are a professional documentary narration writer. "
                 "Write only spoken narration for the requested section. No JSON."
             ),
+            min_words=min_words,
+            max_words=max_words,
             temperature=temperature,
             max_tokens=_section_token_budget(section.target_word_count, attempt),
         )
-        cleaned = _clean_narration_output(text)
+        cleaned = last_narration
         words = word_count(cleaned)
         degenerate = _is_degenerate_repetition(cleaned)
 
@@ -808,7 +804,7 @@ def _build_legacy_narration_prompt(
         "max_words": max_words,
         "topic_brief": topic_brief_context(brief),
         "research_context": research_brief_context(research, rich=True),
-        "story_context": story_context(story),
+        "story_context": story_architecture_context(story),
         "length_repair_instruction": "",
     }
     return load_prompt("studio_narration_writer", **variables)
@@ -872,3 +868,29 @@ def _clean_narration_output(text: str) -> str:
     text = "\n".join(cleaned_lines).strip()
     
     return text
+
+
+async def _generate_section_with_validation(
+    *,
+    prompt: str,
+    system: str,
+    min_words: int,
+    max_words: int,
+    temperature: float = 0.55,
+    max_tokens: int = 1800,
+) -> tuple[str, dict[str, Any]]:
+    """
+    Single generation call. Retries, degenerate-repetition rejection, and
+    differentiated repair instructions are already owned by the caller
+    (_generate_narration_section) — this used to run its own internal
+    3-attempt loop on top of that, meaning one section could trigger up to
+    9 real LLM calls before giving up. Removed: retry logic now lives in
+    exactly one place.
+    """
+    text, metadata = await generate_text_with_metadata(
+        prompt=prompt,
+        system=system,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    return _clean_narration_output(text), metadata

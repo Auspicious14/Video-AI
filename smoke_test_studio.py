@@ -35,13 +35,12 @@ from services.ai.studio import run_youtube_studio_production
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--topic", required=True)
-    parser.add_argument("--duration", type=int, default=90)
+    parser.add_argument("--duration", type=int, required=True, default=90)
     parser.add_argument(
         "--render",
         action="store_true",
         help="Also render the final MP4, not just the production package",
     )
-    parser.add_argument("--preset", type=str, default="short")
     args = parser.parse_args()
 
     job_id = str(uuid.uuid4())
@@ -55,12 +54,11 @@ async def main() -> None:
         generate_audio=True,
         generate_images=True,
         render_video=args.render,
-        preset=args.preset,
     )
 
     print(
         f"[smoke test] job_id={job_id} topic={args.topic!r} "
-        f"duration={args.duration}s render={args.render} preset={args.preset}\n"
+        f"duration={args.duration}s render={args.render}"
     )
     t0 = time.monotonic()
 

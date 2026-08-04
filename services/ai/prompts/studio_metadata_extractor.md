@@ -11,20 +11,25 @@ RESEARCH CONTEXT (for verification)
 {research_context}
 
 Return valid JSON with exactly these top-level fields:
+
 - hook: string (extract the opening 15-25 words that serve as the hook)
 - sections: array of strings (identify 3-7 major section titles that structure the narrative)
 - key_entities: array of strings (people, companies, places, organizations mentioned)
 - key_facts: array of strings (5-8 core factual claims or insights presented)
 - chapters: array of strings (YouTube chapter markers with timestamps like "0:00 Introduction", "2:30 The Discovery")
 - source_notes: array of strings (3-5 credible references that should be cited)
-- estimated_duration_seconds: integer (calculated from narration word count: round(word_count * 60 / 145))
+- estimated_duration_seconds: integer (calculated from narration word count: round(word_count \* 60 / 145))
 
 EXTRACTION GUIDELINES:
 
 1. HOOK
-   - Extract the actual opening 15-25 words from the narration
-   - Do NOT rephrase or summarize
-   - This should be the emotionally strong opening line
+   - Extract the actual opening 15-25 words from the narration, verbatim
+   - Do NOT rephrase, summarize, or combine multiple sentences
+   - This must be ONE sentence or clause only — if the narration's opening
+     sentence is longer than 25 words, extract only the first clause up
+     to 25 words, not the whole sentence
+   - Before finalizing: count the words in your hook value. If it exceeds
+     25, cut it down to the first 25 words and stop there
 
 2. SECTIONS
    - Identify 3-7 major thematic sections in the narrative flow
@@ -57,7 +62,7 @@ EXTRACTION GUIDELINES:
 
 7. DURATION CALCULATION
    - Count words in narration
-   - Estimated seconds = round(word_count * 60 / 145)
+   - Estimated seconds = round(word_count \* 60 / 145)
    - Standard speaking pace: 145 words per minute for documentaries
 
 CRITICAL: Do NOT include the narration text in your JSON output.

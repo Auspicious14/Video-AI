@@ -223,101 +223,239 @@ def research_to_summary(research: ResearchResult) -> str:
     return "\n".join(lines)
 
 
+# def research_to_context(research: ResearchResult) -> str:
+#     """
+#     Format a ResearchResult into a rich context block for long-form agents
+#     (YouTube long-form, blog, LinkedIn, newsletters).
+
+#     More detailed than research_to_summary — includes platform angles,
+#     audience insights, and misconceptions.
+#     """
+#     lines = [
+#         f"TOPIC: {research.topic}",
+#         f"PLATFORM: {research.platform}",
+#         f"TONE: {research.tone}",
+#         "",
+#         f"EXECUTIVE SUMMARY:",
+#         f"  {research.executive_summary}",
+#         "",
+#         "KEY FACTS:",
+#         *[f"  {i+1}. {f}" for i, f in enumerate(research.key_facts)],
+#         "",
+#     ]
+
+#     if research.timeline:
+#         lines += [
+#             "TIMELINE:",
+#             *[f"  - {t}" for t in research.timeline],
+#             "",
+#         ]
+
+#     lines += [
+#         "SURPRISING FACTS:",
+#         *[f"  - {f}" for f in research.surprising_facts],
+#         "",
+#         "MISCONCEPTIONS:",
+#         *[f"  - {m}" for m in research.misconceptions],
+#         "",
+#         "INTERESTING STATS:",
+#         *[f"  - {s}" for s in research.interesting_stats],
+#         "",
+#     ]
+
+#     if research.emotional_angles:
+#         lines.append("EMOTIONAL ANGLES:")
+#         for ea in research.emotional_angles:
+#             if isinstance(ea, EmotionalAngle):
+#                 lines.append(f"  [{ea.angle}] {ea.description}")
+#                 if ea.example_hook:
+#                     lines.append(f"    Example: \"{ea.example_hook}\"")
+#             else:
+#                 lines.append(f"  - {ea}")
+#         lines.append("")
+
+#     lines += [
+#         "ALL HOOKS (sorted by strength):",
+#         *[f"  [{h.strength:.1f}] {h.hook}" for h in sorted(research.hook_opportunities, key=lambda x: x.strength, reverse=True)],
+#         "",
+#         "PLATFORM ANGLES:",
+#         f"  TikTok/Reels:   {research.content_angles.tiktok_short}",
+#         f"  YouTube Short:  {research.content_angles.youtube_short}",
+#         f"  YouTube Long:   {research.content_angles.youtube_long}",
+#         f"  Blog:           {research.content_angles.blog}",
+#         f"  LinkedIn:       {research.content_angles.linkedin}",
+#         f"  Twitter Thread: {research.content_angles.twitter_thread}",
+#         f"  Newsletter:     {research.content_angles.newsletter}",
+#         "",
+#         "AUDIENCE INSIGHTS:",
+#         f"  Cultural context: {research.audience_insights.cultural_context}",
+#         "  Pain points:",
+#         *[f"    - {p}" for p in research.audience_insights.primary_pain_points],
+#         "  Common questions:",
+#         *[f"    - {q}" for q in research.audience_insights.common_questions],
+#     ]
+
+#     if research.reliable_sources:
+#         lines += [
+#             "",
+#             "RELIABLE SOURCES:",
+#             *[f"  [{rs.type}] {rs.name} — {rs.relevance}" for rs in research.reliable_sources],
+#         ]
+
+#     if research.has_risks:
+#         lines += [
+#             "",
+#             "⚠️  RISK FLAGS:",
+#             *[f"  [{rf.risk_type}] {rf.description} | Mitigation: {rf.mitigation}" for rf in research.risk_flags],
+#         ]
+
+#     if research.content_warnings:
+#         lines += [
+#             "",
+#             "CONTENT WARNINGS:",
+#             *[f"  - {w}" for w in research.content_warnings],
+#         ]
+
+#     return "\n".join(lines)
+
 def research_to_context(research: ResearchResult) -> str:
     """
-    Format a ResearchResult into a rich context block for long-form agents
-    (YouTube long-form, blog, LinkedIn, newsletters).
+    Rich context for documentary writers.
 
-    More detailed than research_to_summary — includes platform angles,
-    audience insights, and misconceptions.
+    Deliberately split into:
+        1. Engagement
+        2. Core Facts
+        3. Visual Context
+
+    This mirrors how documentary writers naturally think.
     """
-    lines = [
+
+    lines: list[str] = []
+
+    # ------------------------------------------------------------------
+    # ENGAGEMENT
+    # ------------------------------------------------------------------
+
+    lines += [
+        "# ENGAGEMENT",
+        "",
         f"TOPIC: {research.topic}",
         f"PLATFORM: {research.platform}",
         f"TONE: {research.tone}",
         "",
-        f"EXECUTIVE SUMMARY:",
-        f"  {research.executive_summary}",
+        "EXECUTIVE SUMMARY:",
+        research.executive_summary,
+        "",
+    ]
+
+    if research.emotional_angles:
+        lines.append("EMOTIONAL ANGLES:")
+        for angle in research.emotional_angles:
+            lines.append(f"- {angle.angle}: {angle.description}")
+            if angle.example_hook:
+                lines.append(f"  Example: {angle.example_hook}")
+        lines.append("")
+
+    if research.hook_opportunities:
+        lines.append("BEST HOOKS:")
+        for hook in sorted(
+            research.hook_opportunities,
+            key=lambda h: h.strength,
+            reverse=True,
+        )[:8]:
+            lines.append(f"- ({hook.strength:.1f}) {hook.hook}")
+        lines.append("")
+
+    # ------------------------------------------------------------------
+    # CORE FACTS
+    # ------------------------------------------------------------------
+
+    lines += [
+        "# CORE FACTS",
         "",
         "KEY FACTS:",
-        *[f"  {i+1}. {f}" for i, f in enumerate(research.key_facts)],
+        *[f"- {x}" for x in research.key_facts],
         "",
     ]
 
     if research.timeline:
         lines += [
             "TIMELINE:",
-            *[f"  - {t}" for t in research.timeline],
+            *[f"- {x}" for x in research.timeline],
             "",
         ]
 
-    lines += [
-        "SURPRISING FACTS:",
-        *[f"  - {f}" for f in research.surprising_facts],
-        "",
-        "MISCONCEPTIONS:",
-        *[f"  - {m}" for m in research.misconceptions],
-        "",
-        "INTERESTING STATS:",
-        *[f"  - {s}" for s in research.interesting_stats],
-        "",
-    ]
+    if research.interesting_stats:
+        lines += [
+            "IMPORTANT NUMBERS:",
+            *[f"- {x}" for x in research.interesting_stats],
+            "",
+        ]
 
-    if research.emotional_angles:
-        lines.append("EMOTIONAL ANGLES:")
-        for ea in research.emotional_angles:
-            if isinstance(ea, EmotionalAngle):
-                lines.append(f"  [{ea.angle}] {ea.description}")
-                if ea.example_hook:
-                    lines.append(f"    Example: \"{ea.example_hook}\"")
-            else:
-                lines.append(f"  - {ea}")
-        lines.append("")
+    if research.surprising_facts:
+        lines += [
+            "SURPRISING FACTS:",
+            *[f"- {x}" for x in research.surprising_facts],
+            "",
+        ]
 
-    lines += [
-        "ALL HOOKS (sorted by strength):",
-        *[f"  [{h.strength:.1f}] {h.hook}" for h in sorted(research.hook_opportunities, key=lambda x: x.strength, reverse=True)],
-        "",
-        "PLATFORM ANGLES:",
-        f"  TikTok/Reels:   {research.content_angles.tiktok_short}",
-        f"  YouTube Short:  {research.content_angles.youtube_short}",
-        f"  YouTube Long:   {research.content_angles.youtube_long}",
-        f"  Blog:           {research.content_angles.blog}",
-        f"  LinkedIn:       {research.content_angles.linkedin}",
-        f"  Twitter Thread: {research.content_angles.twitter_thread}",
-        f"  Newsletter:     {research.content_angles.newsletter}",
-        "",
-        "AUDIENCE INSIGHTS:",
-        f"  Cultural context: {research.audience_insights.cultural_context}",
-        "  Pain points:",
-        *[f"    - {p}" for p in research.audience_insights.primary_pain_points],
-        "  Common questions:",
-        *[f"    - {q}" for q in research.audience_insights.common_questions],
-    ]
+    if research.misconceptions:
+        lines += [
+            "COMMON MISCONCEPTIONS:",
+            *[f"- {x}" for x in research.misconceptions],
+            "",
+        ]
 
     if research.reliable_sources:
         lines += [
-            "",
             "RELIABLE SOURCES:",
-            *[f"  [{rs.type}] {rs.name} — {rs.relevance}" for rs in research.reliable_sources],
+            *[
+                f"- [{s.type}] {s.name}: {s.relevance}"
+                for s in research.reliable_sources
+            ],
+            "",
         ]
+
+    # ------------------------------------------------------------------
+    # VISUAL CONTEXT
+    # ------------------------------------------------------------------
+
+    lines += [
+        "# VISUAL CONTEXT",
+        "",
+    ]
+
+    if research.visual_opportunities:
+        lines.append("VISUAL OPPORTUNITIES:")
+
+        for visual in research.visual_opportunities:
+            lines.append(
+                f"- [{visual.visual_type}] {visual.concept}"
+            )
+
+            if visual.description:
+                lines.append(
+                    f"  Description: {visual.description}"
+                )
+
+            if visual.scene_moment:
+                lines.append(
+                    f"  Best used: {visual.scene_moment}"
+                )
+
+        lines.append("")
 
     if research.has_risks:
         lines += [
+            "FACTUAL CAUTIONS:",
+            *[
+                f"- {r.description} | {r.mitigation}"
+                for r in research.risk_flags
+            ],
             "",
-            "⚠️  RISK FLAGS:",
-            *[f"  [{rf.risk_type}] {rf.description} | Mitigation: {rf.mitigation}" for rf in research.risk_flags],
-        ]
-
-    if research.content_warnings:
-        lines += [
-            "",
-            "CONTENT WARNINGS:",
-            *[f"  - {w}" for w in research.content_warnings],
         ]
 
     return "\n".join(lines)
-
 
 def research_hooks_summary(research: ResearchResult) -> str:
     """
