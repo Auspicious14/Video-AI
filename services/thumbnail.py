@@ -130,9 +130,10 @@ def create_thumbnail(
         if sep in text:
             text = text.split(sep)[0].strip()
             break
+
     words = text.split()
-    if len(words) > 6:
-        text = " ".join(words[:6])
+    if len(words) > 14:
+        text = " ".join(words[:14])
 
     font_size = 92
     font = _find_font(font_size)
@@ -142,18 +143,24 @@ def create_thumbnail(
     current=[]
 
     for word in text.split():
-        test=" ".join(current+[word])
-
-        if draw.textlength(test,font=font)>max_width and current:
+        test = " ".join(current + [word])
+        if draw.textlength(test, font=font) > max_width and current:
             lines.append(" ".join(current))
-            current=[word]
+            current = [word]
         else:
             current.append(word)
     if current:
         lines.append(" ".join(current))
+
+    MAX_LINES = 3
+    if len(lines) > MAX_LINES:
+        lines = lines[:MAX_LINES]
+        lines[-1] = lines[-1].rstrip() + "…"
+
     x = 60
     y = height * 0.28
     line_spacing = font_size + 8
+    
     for line in lines:
         for dx in range(-5,6):
             for dy in range(-5,6):

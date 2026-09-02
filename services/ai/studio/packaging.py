@@ -1,7 +1,8 @@
 """Stages 12-15: packaging, SEO, and final QA specialists."""
 
 from __future__ import annotations
-
+from fsspec import json
+import json as _json
 from services.ai.schemas import (
     AssetCollectionResult,
     AudioQAResult,
@@ -115,7 +116,13 @@ async def run_final_qa_agent(
             "visual_plan_context": visual_plan_context(visual_plan),
             "asset_collection_json": asset_collection.model_dump_json(indent=2),
             "audio_qa_json": audio_qa.model_dump_json(indent=2) if audio_qa else "{}",
-            "editing_plan_json": editing_plan.model_dump_json(indent=2),
+            "editing_plan_json": _json.dumps({
+                "fps": editing_plan.fps,
+                "music_direction": editing_plan.music_direction,
+                "caption_style": editing_plan.caption_style,
+                "transition_count": len(editing_plan.transitions),
+                "sample_transitions": editing_plan.transitions[:5],
+            }, indent=2),
             "thumbnail_json": thumbnails.model_dump_json(indent=2),
             "title_json": titles.model_dump_json(indent=2),
             "seo_json": seo.model_dump_json(indent=2),

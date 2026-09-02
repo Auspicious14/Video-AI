@@ -34,6 +34,7 @@ class ProviderName(str, Enum):
     GROQ   = "groq"
     MISTRAL = "mistral"
     GEMINI = "gemini"
+    AGENTROUTER = "agentrouter" 
     OPENAI = "openai"
 
 
@@ -96,7 +97,7 @@ def _load_provider_order() -> list[ProviderName]:
     Format: comma-separated names, e.g. "groq,gemini"
     Defaults to groq → gemini.
     """
-    raw = os.getenv("PROVIDER_ORDER", "groq,mistral,gemini")
+    raw = os.getenv("PROVIDER_ORDER", "groq,mistral,gemini,agentrouter")
     names = [n.strip().lower() for n in raw.split(",") if n.strip()]
     order: list[ProviderName] = []
     for n in names:
@@ -104,7 +105,7 @@ def _load_provider_order() -> list[ProviderName]:
             order.append(ProviderName(n))
         except ValueError:
             logger.warning("Unknown provider in PROVIDER_ORDER: %r — ignored", n)
-    return order or [ProviderName.GROQ, ProviderName.MISTRAL, ProviderName.GEMINI]
+    return order or [ProviderName.GROQ, ProviderName.MISTRAL, ProviderName.GEMINI, ProviderName.AGENTROUTER]
 
 
 def build_provider_registry() -> dict[ProviderName, ProviderConfig]:
@@ -117,8 +118,8 @@ def build_provider_registry() -> dict[ProviderName, ProviderConfig]:
             name       = ProviderName.GROQ,
             api_key    = os.getenv("GROQ_API_KEY", ""),
             base_url   = "https://api.groq.com/openai/v1",
-            model      = "llama-3.3-70b-versatile",
-            json_model = "llama-3.3-70b-versatile",
+            model      = "openai/gpt-oss-120b",
+            json_model = "openai/gpt-oss-120b",
             timeout    = 45.0,
             max_output_tokens = 8192,
             max_total_tokens = 32768,
@@ -144,6 +145,16 @@ def build_provider_registry() -> dict[ProviderName, ProviderConfig]:
             # Conservative allocation based on observed behavior
             max_output_tokens = 8192,
             max_total_tokens = 1000000,  # 1M context window
+        ),
+        ProviderName.AGENTROUTER: ProviderConfig(
+            name       = ProviderName.AGENTROUTER,
+            api_key    = os.getenv("AGENTROUTER_API_KEY", ""),
+            base_url   = "https://agentrouter.org/v1",
+            model      = "gpt-5.6",  # confirm the exact model string in your AgentRouter dashboard
+            json_model = "gpt-5.6",
+            timeout    = 45.0,
+            max_output_tokens = 4096,
+            max_total_tokens = 32000,
         ),
         ProviderName.OPENAI: ProviderConfig(
             name       = ProviderName.OPENAI,

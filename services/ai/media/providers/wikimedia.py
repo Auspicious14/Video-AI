@@ -12,6 +12,9 @@ from services.ai.media.visual_intent import VisualIntent
 
 logger = logging.getLogger(__name__)
 
+HEADERS = {
+    "User-Agent": "SecondOrderDocumentaryBot/1.0 (+https://auspicious.vercel.app; mailto:uthmanabdulganiyu2019@gmail.com)"
+}
 
 class WikimediaProvider(MediaProvider):
 
@@ -64,13 +67,8 @@ class WikimediaProvider(MediaProvider):
                 f"&srsearch={encoded}"
             )
 
-            response = requests.get(
-                search_url,
-                timeout=20,
-            )
-
+            response = requests.get(search_url, headers=HEADERS, timeout=20)
             response.raise_for_status()
-
             data = response.json()
 
             results = (
@@ -79,12 +77,9 @@ class WikimediaProvider(MediaProvider):
             )
 
             for item in results[:limit]:
-
                 title = item.get("title")
-
                 if not title:
                     continue
-
                 info_url = (
                     "https://commons.wikimedia.org/w/api.php?"
                     "action=query"
@@ -94,12 +89,7 @@ class WikimediaProvider(MediaProvider):
                     "&origin=*"
                     f"&titles={urllib.parse.quote(title)}"
                 )
-
-                info = requests.get(
-                    info_url,
-                    timeout=20,
-                )
-
+                info = requests.get(info_url, headers=HEADERS, timeout=20)
                 info.raise_for_status()
 
                 pages = (
@@ -109,67 +99,42 @@ class WikimediaProvider(MediaProvider):
                 )
 
                 for page in pages.values():
-
                     imageinfo = page.get("imageinfo")
-
                     if not imageinfo:
                         continue
-
                     img = imageinfo[0]
-
                     url = img.get("url")
-
                     if not url:
                         continue
-
                     mime = img.get("mime", "")
-
-                    if "svg" in mime.lower():
+                    ALLOWED_MIMES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+                    if mime.lower() not in ALLOWED_MIMES:
                         continue
-
                     width = img.get("width", 1920)
                     height = img.get("height", 1080)
 
                     assets.append(
-
                         MediaAsset(
-
                             provider_id=title,
-
                             title=title,
-
                             description=item.get("snippet", ""),
-
                             author="Wikimedia Commons",
-
                             preview_url=url,
-
                             url=url,
-
                             provider=self.name,
-
                             kind=intent.preferred_asset_kind,  # Fixed: was intent.kind
-
                             relevance=.90,
-
                             quality=.85,
-
                             width=width,
-
                             height=height,
-
                             aspect_ratio=width / max(height, 1),
-
                             freshness=.60,
-
                             credibility=.98,
-
                             licensing="public_domain",
                         )
                     )
 
         except Exception as exc:
-
             logger.warning(
                 "Wikimedia search failed: %s",
                 exc,

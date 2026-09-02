@@ -55,6 +55,7 @@ _RETRYABLE_MESSAGES = {
     "timeout", "rate limit", "rate_limit", "overloaded", "service unavailable",
     "connection", "network", "503", "502", "429",
     "json_validate_failed", "max completion tokens reached",
+    "empty content",
 }
 
 # Gemini rate limiting
@@ -144,49 +145,33 @@ def _clamp_tokens_for_provider(cfg: ProviderConfig, prompt: str, system: str, re
 
 # ── Provider callers ──────────────────────────────────────────────────────────
 
-async def _call_groq(
-    cfg: ProviderConfig,
-    *,
-    prompt: str,
-    system: str,
-    temperature: float,
-    max_tokens: int,
-    json_mode: bool,
-) -> tuple[str, dict[str, Any]]:
-    """
-    Calls Groq via the OpenAI-compatible Python SDK.
-    Groq supports response_format={"type":"json_object"} natively.
-    
-    Returns tuple of (content, metadata) where metadata contains:
-    - finish_reason: why generation stopped
-    - prompt_tokens: input token count
-    - output_tokens: output token count  
-    - total_tokens: combined count
-    """
-    # pyrefly: ignore [missing-import]
+async def _call_groq(cfg, *, prompt, system, temperature, max_tokens, json_mode):
     from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url, timeout=cfg.timeout)
+    model_name = cfg.json_model if json_mode else cfg.model
     if cfg.name == ProviderName.MISTRAL:
         await _mistral_rate_gate()
-    client = AsyncOpenAI(
-        api_key=cfg.api_key,
-        base_url=cfg.base_url,
-        timeout=cfg.timeout,
-    )
 
-    max_tokens = _clamp_tokens_for_provider(cfg, prompt, system, max_tokens)
-
-    kwargs: dict[str, Any] = {
-        "model": cfg.json_model if json_mode else cfg.model,
+    kwargs = {
+        "model": model_name,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user",   "content": prompt},
+            {"role": "user", "content": prompt},
         ],
         "temperature": temperature,
-        "max_tokens":  max_tokens,
+        "max_tokens": max_tokens,
     }
-
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
+
+    # gpt-oss is a genuine reasoning model — unlike Llama 3.3, it can spend
+    # the entire max_tokens budget on invisible chain-of-thought and return
+    # empty content, especially under tight per-agent budgets sized for a
+    # non-reasoning model. Minimize reasoning effort so tokens go to the
+    # actual answer instead — same fix class as Gemini's thinking_budget=0.
+    if "gpt-oss" in model_name:
+        kwargs["reasoning_effort"] = "low"
 
     response = await client.chat.completions.create(**kwargs)
 
@@ -403,6 +388,7 @@ _PROVIDER_CALLERS = {
     ProviderName.GROQ:   _call_groq,
     ProviderName.MISTRAL: _call_groq,
     ProviderName.GEMINI: _call_gemini,
+    ProviderName.AGENTROUTER: _call_groq,
 }
 
 

@@ -371,6 +371,7 @@ def _pixazo_headers() -> dict:
     return {**PIXAZO_HEADERS, "Ocp-Apim-Subscription-Key": PIXAZO_API_KEY}
 
 
+
 def _poll_pixazo_schnell(request_id: str, base_url: str) -> str:
     """
     Poll Pixazo Schnell Free via POST to /checkStatus.
@@ -511,6 +512,26 @@ class ImageGenerationClient:
     # Free tier, ~10 req/min, ~1.2s generation time.
     # Docs: https://www.pixazo.ai/models/flux (section 7: Flux 1 Schnell - FREE)
 
+    def _generate_pollinations(self, prompt: str, output_path: str, width: int, height: int) -> str:
+        """Pollinations.ai — free Seed-tier key required as of their current API
+        (my earlier 'no key needed' claim was based on outdated third-party
+        reviews, not their actual docs — corrected here)."""
+        import urllib.parse
+        key = os.getenv("POLLINATIONS_API_KEY", "")
+        if not key:
+            raise ValueError("POLLINATIONS_API_KEY not set — get a free key at enter.pollinations.ai")
+
+        encoded = urllib.parse.quote(prompt)
+        url = f"https://gen.pollinations.ai/image/{encoded}"
+        params = {"width": width, "height": height, "nologo": "true", "model": "flux", "key": key}
+        resp = requests.get(url, params=params, timeout=30)
+        resp.raise_for_status()
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "wb") as f:
+            f.write(resp.content)
+        logger.info(f"[Pollinations] ✓ Saved: {output_path}")
+        return output_path
+
     def _generate_pixazo_schnell(self, prompt: str, output_path: str, width: int, height: int) -> str:
         if not PIXAZO_API_KEY:
             raise ValueError("PIXAZO_API_KEY not set")
@@ -626,15 +647,16 @@ class ImageGenerationClient:
     ) -> str:
         enhanced = enhance_prompt(prompt, scene_context=scene_context, health_mode=health_mode)
         errors = []
-
         fast_order = [
+            ("Pollinations", lambda: self._generate_pollinations(enhanced, output_path, width, height)),
             ("Pixazo Schnell Free", lambda: self._generate_pixazo_schnell(enhanced, output_path, width, height)),
             ("Pixazo Flux 2 Klein", lambda: self._generate_pixazo_klein(enhanced, output_path, width, height)),
             ("fal.ai", lambda: self._generate_fal(enhanced, output_path, width, height)),
         ]
-        quality_order = [
+        quality_order = [        
             ("Pixazo Flux 2 Klein", lambda: self._generate_pixazo_klein(enhanced, output_path, width, height)),
             ("fal.ai", lambda: self._generate_fal(enhanced, output_path, width, height)),
+            ("Pollinations", lambda: self._generate_pollinations(enhanced, output_path, width, height)),
             ("Pixazo Schnell Free", lambda: self._generate_pixazo_schnell(enhanced, output_path, width, height)),
         ]
 

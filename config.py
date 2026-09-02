@@ -9,6 +9,7 @@ GEMINI_API_KEY     = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY       = os.getenv("GROQ_API_KEY", "")
 CEREBRAS_API_KEY   = os.getenv("CEREBRAS_API_KEY", "")
 MISTRAL_API_KEY    = os.getenv("MISTRAL_API_KEY", "")
+AGENTROUTER_API_KEY = os.getenv("AGENTROUTER_API_KEY", "")
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")   # optional — leave blank for gTTS
 HF_API_KEY         = os.getenv("HF_API_KEY", "")            # free token: huggingface.co/settings/tokens
@@ -53,3 +54,4 @@ PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
 UNSPLASH_ACCESS_KEY= os.getenv("UNSPLASH_ACCESS_KEY", "")
 UNSPLASH_SECRET_KEY= os.getenv("UNSPLASH_SECRET_KEY", "")
 UNSPLASH_APP_ID= os.getenv("UNSPLASH_APP_ID", "")
+POLLINATIONS_API_KEY= os.getenv("POLLINATIONS_API_KEY", "")

@@ -493,30 +493,30 @@ async def run_youtube_studio_production(job_id: str, req: YouTubeStudioRequest) 
 
             for item in image_generation_plan.prompts:
                 output_path = OUTPUT_DIR / f"{job_id}_studio_visual_{item.index}.jpg"
+                asset_type_value = item.asset_type.value if hasattr(item.asset_type, "value") else str(item.asset_type)
+
+                STAT_CARD_TYPES = {"chart", "infographic", "motion_graphic"}
+
+                if asset_type_value in STAT_CARD_TYPES:
+                    from services.chart_card import extract_key_stat, create_stat_card
+                    stat_info = extract_key_stat(item.narration_reference or item.on_screen)
+                    logger.info(f"[Chart] Visual {item.index} type={asset_type_value} stat_found={bool(stat_info)}")
+                    if stat_info:
+                        ...
+                        try:
+                            create_stat_card(*stat_info, output_path, width, height)
+                            generated_images.append({"visual_index": item.index, "local_path": str(output_path), "status": "generated"})
+                            continue
+                        except Exception as exc:
+                            logger.warning(f"Stat card render failed | job={job_id} visual={item.index} error={exc}")
+
                 prompt = item.generation_prompt or item.on_screen
                 try:
-                    await image_client.generate_image(
-                        prompt=prompt,
-                        output_path=str(output_path),
-                        width=width,
-                        height=height,
-                    )
-                    generated_images.append(
-                        {
-                            "visual_index": item.index,
-                            "local_path": str(output_path),
-                            "status": "generated",
-                        }
-                    )
-                except Exception as exc:  # noqa: BLE001
+                    await image_client.generate_image(prompt=prompt, output_path=str(output_path), width=width, height=height)
+                    generated_images.append({"visual_index": item.index, "local_path": str(output_path), "status": "generated"})
+                except Exception as exc:
                     logger.warning("Studio image generation failed | job=%s visual=%s error=%s", job_id, item.index, exc)
-                    generated_images.append(
-                        {
-                            "visual_index": item.index,
-                            "status": "failed",
-                            "error": str(exc),
-                        }
-                    )
+                    generated_images.append({"visual_index": item.index, "status": "failed", "error": str(exc)})
             _save_job_artifact(job_id, "generated_images", generated_images)
 
         # Stage 9 and 10

@@ -817,6 +817,29 @@ class ScriptQAResult(BaseModel):
             return [str(item).strip() for item in v if str(item).strip()]
         return [str(v)]
 
+class ScriptQAGeneration(BaseModel):
+    """What the QA agent actually needs to produce — never the full script,
+    which already exists correctly from the writing stage. Reproducing it
+    under a tight token budget is what was silently shrinking narration."""
+    model_config = _EXTRA_ALLOW
+
+    approved: bool = False
+    score: float = Field(default=0.0, ge=0.0, le=100.0)
+    issues: list[QualityIssue] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
+    revised_narration: Optional[str] = None  # only set if a targeted rewrite is genuinely needed
+
+    @field_validator("strengths", mode="before")
+    @classmethod
+    def coerce_strengths(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            parts = [part.strip() for part in v.replace("\n", ",").split(",")]
+            return [part for part in parts if part]
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if str(item).strip()]
+        return [str(v)]
 
 class VisualAssetSpec(BaseModel):
     """One asset within a visual beat. A narration beat may use several assets."""

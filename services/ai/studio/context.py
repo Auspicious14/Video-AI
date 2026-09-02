@@ -293,14 +293,23 @@ def script_context(script: DocumentaryScriptResult | ScriptQAResult) -> str:
     )
 
 
-def visual_plan_context(plan: VisualPlanResult) -> str:
-    """DEPRECATED: Use context objects instead."""
-    lines = [f"VISUAL STYLE: {plan.visual_style}", "TIMELINE:"]
-    for item in plan.timeline:
+def visual_plan_context(plan: VisualPlanResult, max_beats: int = 20) -> str:
+    """
+    Compact timeline summary for prompts needing transition/pacing context,
+    not full per-beat text. Previously unbounded — at high beat counts (a
+    240s+ video with many chapters easily produces 40-50+ beats) this
+    serialized the ENTIRE timeline verbatim, which is what produced a
+    42,000-token single call and starved the rest of the run's quota.
+    """
+    lines = [f"VISUAL STYLE: {plan.visual_style}", f"TIMELINE ({len(plan.timeline)} beats total):"]
+    for item in plan.timeline[:max_beats]:
+        on_screen = item.on_screen[:80] + ("…" if len(item.on_screen) > 80 else "")
         lines.append(
             f"  {item.index}. {item.start_seconds:.1f}-{item.end_seconds:.1f}s "
-            f"[{item.asset_type.value}] {item.on_screen}"
+            f"[{item.asset_type.value}] {on_screen}"
         )
+    if len(plan.timeline) > max_beats:
+        lines.append(f"  ... and {len(plan.timeline) - max_beats} more beats (omitted for brevity)")
     return "\n".join(lines)
 
 

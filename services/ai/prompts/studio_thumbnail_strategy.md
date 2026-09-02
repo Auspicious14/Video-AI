@@ -11,6 +11,14 @@ HOOK
 KEY CONCEPTS
 {key_concepts}
 
+TEXT_OVERLAY FORMULA — text_overlay must express the video's actual
+central question or conflict, never a bare topic label or sub-topic. Use
+the same pattern family as strong documentary titles: "How X happened",
+"Why X happened", the hidden mechanism, the surprising contradiction, the
+scale, or the consequence. A flat label like "Housing Market Crash" or
+"Artificial Intelligence" has failed this requirement — it must be a
+question, story, or problem, not a subject name.
+
 Return valid JSON with exactly these top-level fields:
 
 - concepts: array of objects with concept, image_prompt, text_overlay, curiosity, clarity, readability, mobile_visibility, emotional_impact

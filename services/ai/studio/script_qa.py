@@ -11,6 +11,7 @@ from services.ai.schemas import (
     ResearchResult,
     ScriptQAResult,
     StoryArchitectureResult,
+    ScriptQAGeneration
 )
 from services.ai.studio.agent_utils import generate_structured_artifact
 from services.ai.studio.context import research_brief_context, script_context, story_context
@@ -37,9 +38,9 @@ async def run_script_qa_agent(
         target_duration = script.estimated_duration_seconds
 
     try:
-        result = await generate_structured_artifact(
+        generated = await generate_structured_artifact(
             prompt_name="studio_script_qa",
-            model=ScriptQAResult,
+            model=ScriptQAGeneration,
             variables={
                 "research_context": research_brief_context(research, rich=False),
                 "story_context": story_context(story),
@@ -50,15 +51,26 @@ async def run_script_qa_agent(
                 "estimated_seconds": estimated_seconds,
             },
             temperature=0.24,
-            max_tokens=1600,
+            max_tokens=900,
             attempts=2,
         )
-        # The AI QA call regenerates revised_script from scratch and has no
-        # reliable way to reconstruct per-section timing — carry it forward
-        # from the pre-QA script rather than trust the LLM to reproduce it.
-        if not result.revised_script.section_metadata and script.section_metadata:
-            result.revised_script.section_metadata = script.section_metadata
-        return result
+
+        # Copy the correctly-generated script forward. Only swap in a QA
+        # rewrite if one was explicitly given AND it isn't suspiciously
+        # shorter than the original — never let QA silently shrink a
+        # script that was already correct. section_metadata comes along
+        # for free since it's a deep copy, no separate carry-forward needed.
+        revised = script.model_copy(deep=True)
+        if generated.revised_narration and len(generated.revised_narration.split()) >= narration_word_count * 0.9:
+            revised.narration = generated.revised_narration
+
+        return ScriptQAResult(
+            approved=generated.approved,
+            score=generated.score,
+            revised_script=revised,
+            issues=generated.issues,
+            strengths=generated.strengths,
+        )
     except ValidationError as exc:
         logger.warning(
             "Script QA AI output failed; using fallback approval gate | topic=%s error=%s",

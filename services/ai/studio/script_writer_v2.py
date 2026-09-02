@@ -317,8 +317,8 @@ async def run_documentary_script_writer_agent(
     return combined
 
 
-CHAPTER_TARGET_WORDS = 55  # sized to match what the model reliably lands close to, per tonight's runs
-MAX_CHAPTERS = 14
+CHAPTER_TARGET_WORDS = 90  # was 55 — fewer, richer chapters instead of many thin ones
+MAX_CHAPTERS = 8            # was 14 — a real documentary rarely has more distinct beats than this
 
 def _build_narration_section_plan(
     *,
@@ -327,21 +327,22 @@ def _build_narration_section_plan(
     story: StoryArchitectureResult,
     target_duration: int,
 ) -> list[NarrationSectionMeta]:
-    """
-    Hook/Intro/Conclusion/CTA stay fixed proportions; chapter COUNT scales
-    with duration instead of letting each chapter's word target balloon.
-    Keeping each chapter near the size that's already proven reliable
-    keeps the per-section undershoot small regardless of total length.
-    """
     total_words = target_word_count(target_duration)
 
     fixed_fractions = {"hook": 0.08, "intro": 0.12, "conclusion": 0.10, "cta": 0.05}
     chapter_fraction = 1.0 - sum(fixed_fractions.values())
     chapter_total_words = round(total_words * chapter_fraction)
 
-    num_chapters = max(3, min(MAX_CHAPTERS, round(chapter_total_words / CHAPTER_TARGET_WORDS)))
+    # Never manufacture more chapters than there's real distinct story
+    # content for — otherwise _split_points duplicates the same few
+    # turning points across many near-identical chapters, wasting LLM
+    # calls on beats that don't add anything.
+    story_beats_available = max(3, len(story.key_turning_points) * 2)
+    num_chapters = max(
+        3,
+        min(MAX_CHAPTERS, story_beats_available, round(chapter_total_words / CHAPTER_TARGET_WORDS)),
+    )
     chapter_words = _distribute_words(chapter_total_words, [1.0 / num_chapters] * num_chapters)
-
     hook_words = round(total_words * fixed_fractions["hook"])
     intro_words = round(total_words * fixed_fractions["intro"])
     conclusion_words = round(total_words * fixed_fractions["conclusion"])

@@ -181,8 +181,8 @@ async def run_visual_planning_agent(
         }]
 
         section_duration = section["end_seconds"] - section["start_seconds"]
-        max_beats = max(1, min(6, round(section_duration / 9)))
-        token_budget = min(1500, max(500, max_beats * 200 + 300))
+        max_beats = max(1, min(5, round(section_duration / 10)))
+        token_budget = min(2200, max(600, max_beats * 260 + 350))
 
         sentences_block = "\n".join(
             f'  - {t["start_seconds"]:.1f}-{t["end_seconds"]:.1f}s: "{t["text"]}"'

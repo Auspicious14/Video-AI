@@ -607,19 +607,16 @@ async def render_video(
         n = len(image_paths)
 
         for i, (img_path, duration) in enumerate(image_paths):
-            # Deterministic effect selection: no randomness
-            effect_fn  = MOTION_EFFECTS[i % len(MOTION_EFFECTS)]
-            ai_clip    = (ai_clip_paths[i] if ai_clip_paths and i < len(ai_clip_paths)
-                          else None)
-            clip_path  = tmp / f"clip_{i:02d}.mp4"
-
-            build_scene_clip(
-                img_path, duration, clip_path,
-                effect_fn=effect_fn, fps=fps,
-                ai_clip_path=ai_clip,
-                width=width,
-                height=height,
-            )
+            effect_fn = MOTION_EFFECTS[i % len(MOTION_EFFECTS)]
+            ai_clip = (ai_clip_paths[i] if ai_clip_paths and i < len(ai_clip_paths) else None)
+            clip_path = tmp / f"clip_{i:02d}.mp4"
+            try:
+                build_scene_clip(img_path, duration, clip_path, effect_fn=effect_fn, fps=fps, ai_clip_path=ai_clip, width=width, height=height)
+            except Exception as exc:
+                logger.warning(f"[Renderer] Scene {i} ({img_path.name}) failed, using fallback frame: {exc}")
+                from services.renderer import create_fallback_frame
+                create_fallback_frame("…", clip_path.with_suffix(".jpg"), width, height)
+                build_scene_clip(clip_path.with_suffix(".jpg"), duration, clip_path, effect_fn=effect_fn, fps=fps, width=width, height=height)
             scene_clips.append((clip_path, duration))
 
         build_final_video(

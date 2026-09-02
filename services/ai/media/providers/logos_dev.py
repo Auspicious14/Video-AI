@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import requests
-
+import os
 from services.ai.media.asset import MediaAsset
 from services.ai.media.asset_types import AssetKind
 from services.ai.media.providers.base import MediaProvider
@@ -26,17 +26,17 @@ class LogosDevProvider(MediaProvider):
         return 10
 
     def is_configured(self) -> bool:
-        return True
+        return bool(os.getenv("LOGO_DEV_API_KEY"))
 
     async def search(
         self,
         intent: VisualIntent,
         limit: int = 1,
     ) -> list[MediaAsset]:
+        api_key = os.getenv("LOGO_DEV_API_KEY")
 
-        if intent.preferred_asset_kind != AssetKind.LOGO:
+        if not api_key or intent.preferred_asset_kind != AssetKind.LOGO:
             return []
-
         entity = next(
             (
                 part
@@ -55,56 +55,32 @@ class LogosDevProvider(MediaProvider):
             .replace("http://", "")
             .split("/")[0]
         )
-
-        logo_url = f"https://img.logo.dev/{domain}?token=YOUR_API_KEY"
+        logo_url = f"https://img.logo.dev/{domain}?token={api_key}"
 
         try:
-
-            response = requests.get(
-                logo_url,
-                timeout=20,
-            )
-
+            response = requests.get(logo_url, timeout=20)
             if response.status_code != 200:
                 return []
 
             return [
-
                 MediaAsset(
-
                     provider_id=domain,
-
                     title=domain,
-
                     description="Company Logo",
-
                     author="logos.dev",
-
                     preview_url=logo_url,
-
                     url=logo_url,
-
                     provider=self.name,
-
                     kind=AssetKind.LOGO,
-
                     relevance=1.0,
-
                     quality=.98,
-
                     width=1024,
-
                     height=1024,
-
                     aspect_ratio=1,
-
                     freshness=1.0,
-
                     credibility=.99,
-
                     licensing="commercial",
                 )
-
             ]
 
         except Exception as exc:
@@ -113,5 +89,4 @@ class LogosDevProvider(MediaProvider):
                 "Logo lookup failed: %s",
                 exc,
             )
-
             return []
