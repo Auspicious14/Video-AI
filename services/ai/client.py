@@ -22,13 +22,22 @@ from __future__ import annotations
 
 import json
 import asyncio
+import contextlib
+import contextvars
 import logging
+import os
 import re
+import tempfile
 import time
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Iterator, Optional, TYPE_CHECKING
 
 from services.ai.exceptions import AIResponseError, ProviderError, ValidationError
-from services.ai.providers import ProviderConfig, ProviderName, get_enabled_providers
+from services.ai.providers import (
+    SCRIPT_PROVIDER_ORDER,
+    ProviderConfig,
+    ProviderName,
+    get_enabled_providers,
+)
 
 try:  # Imported at module scope so tests can patch SDK calls directly.
     # pyrefly: ignore [missing-import]
@@ -56,7 +65,50 @@ _RETRYABLE_MESSAGES = {
     "connection", "network", "503", "502", "429",
     "json_validate_failed", "max completion tokens reached",
     "empty content",
+    # Out of credit / plan limit on one provider → fall through to the next
+    # one instead of killing the whole video.
+    "insufficient balance", "insufficient_balance", "402", "quota",
+    "usage limit", "limit reached", "provider unavailable",
 }
+
+# ── Per-stage provider preference ─────────────────────────────────────────────
+
+_preferred_providers: contextvars.ContextVar[Optional[list[ProviderName]]] = contextvars.ContextVar(
+    "preferred_providers", default=None
+)
+
+
+# When the Claude CLI reports a plan/usage limit, skip it for a while instead
+# of hitting it again for every narration section.
+_CLAUDE_CLI_COOLDOWN_SECONDS = float(os.getenv("CLAUDE_CLI_COOLDOWN_SECONDS", "1800"))
+_provider_cooldown_until: dict[ProviderName, float] = {}
+
+
+def _in_cooldown(name: ProviderName) -> bool:
+    return time.monotonic() < _provider_cooldown_until.get(name, 0.0)
+
+
+@contextlib.contextmanager
+def prefer_providers(names: Optional[list[ProviderName]]) -> Iterator[None]:
+    """
+    Try ``names`` first for every AI call made inside this block, then fall
+    back to the normal PROVIDER_ORDER chain.
+
+        with prefer_providers([ProviderName.CLAUDE_CLI]):
+            text, meta = await generate_text_with_metadata(...)
+    """
+    token = _preferred_providers.set(list(names or []))
+    try:
+        yield
+    finally:
+        _preferred_providers.reset(token)
+
+
+@contextlib.contextmanager
+def script_writing_providers() -> Iterator[None]:
+    """Use SCRIPT_PROVIDER_ORDER (e.g. claude_cli → deepseek) inside this block."""
+    with prefer_providers(SCRIPT_PROVIDER_ORDER):
+        yield
 
 # Gemini rate limiting
 _GEMINI_MIN_INTERVAL = 12.5  # 60s / 5 RPM, with a small safety margin
@@ -173,6 +225,12 @@ async def _call_groq(cfg, *, prompt, system, temperature, max_tokens, json_mode)
     if "gpt-oss" in model_name:
         kwargs["reasoning_effort"] = "low"
 
+    # DeepSeek V4 models can "think" before answering, which burns output
+    # tokens and time. Off by default; set DEEPSEEK_THINKING=enabled to use it.
+    if cfg.name == ProviderName.DEEPSEEK:
+        thinking = "enabled" if os.getenv("DEEPSEEK_THINKING", "disabled").lower() == "enabled" else "disabled"
+        kwargs["extra_body"] = {"thinking": {"type": thinking}}
+
     response = await client.chat.completions.create(**kwargs)
 
     finish_reason = response.choices[0].finish_reason or "unknown"
@@ -187,7 +245,7 @@ async def _call_groq(cfg, *, prompt, system, temperature, max_tokens, json_mode)
 
     content = response.choices[0].message.content
     if not content:
-        raise AIResponseError("Groq returned empty content")
+        raise AIResponseError(f"{cfg.name.value} returned empty content")
     
     return content, metadata
 
@@ -382,6 +440,89 @@ async def _call_gemini(
     return text, metadata
 
 
+async def _call_claude_cli(cfg, *, prompt, system, temperature, max_tokens, json_mode):
+    """
+    Run the Claude Code CLI in print mode (`claude -p`).
+
+    When you are logged in to Claude Code with your Claude plan (Pro/Max), this
+    draws from your plan's usage instead of API credits. It is meant for your
+    own machine — not for serving other people's requests.
+
+    Notes
+    -----
+    * temperature / max_tokens are not supported by the CLI and are ignored.
+    * ANTHROPIC_API_KEY is removed from the child environment on purpose: if it
+      were set, the CLI would bill the API key instead of your plan.
+    * All tools are disabled and the process runs in an empty temp directory,
+      so the model can only write text.
+    """
+    binary = os.getenv("CLAUDE_CLI_PATH", "claude")
+    system_prompt = system or "You are a helpful assistant."
+    if json_mode:
+        system_prompt += "\n\nRespond with valid JSON only. No markdown fences, no commentary."
+
+    cmd = [
+        binary, "-p",
+        "--output-format", "json",
+        "--model", cfg.model,
+        "--system-prompt", system_prompt,
+        "--tools", "",
+        "--no-session-persistence",
+    ]
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+
+    with tempfile.TemporaryDirectory(prefix="claude_cli_") as workdir:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=workdir,
+                env=env,
+            )
+        except FileNotFoundError as exc:
+            raise AIResponseError(f"claude_cli provider unavailable: {binary} not found") from exc
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(prompt.encode("utf-8")), timeout=cfg.timeout
+            )
+        except asyncio.TimeoutError as exc:
+            proc.kill()
+            await proc.wait()
+            raise AIResponseError(f"claude_cli timeout after {cfg.timeout:.0f}s") from exc
+
+    out = stdout.decode("utf-8", errors="replace").strip()
+    err = stderr.decode("utf-8", errors="replace").strip()
+
+    try:
+        payload = json.loads(out) if out else {}
+    except json.JSONDecodeError:
+        payload = {}
+
+    result = payload.get("result") if isinstance(payload, dict) else None
+    if proc.returncode != 0 or (isinstance(payload, dict) and payload.get("is_error")) or not result:
+        detail = (result or err or out or f"exit code {proc.returncode}")[:300]
+        # Marked retryable so failover moves on to DeepSeek etc.
+        raise AIResponseError(f"claude_cli provider unavailable: {detail}")
+
+    usage = payload.get("usage") or {}
+    prompt_tokens = (
+        _safe_int(usage.get("input_tokens"))
+        + _safe_int(usage.get("cache_read_input_tokens"))
+        + _safe_int(usage.get("cache_creation_input_tokens"))
+    )
+    output_tokens = _safe_int(usage.get("output_tokens"))
+    metadata = {
+        "finish_reason": "stop",
+        "prompt_tokens": prompt_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": prompt_tokens + output_tokens,
+    }
+    return str(result), metadata
+
+
 # ── Dispatch table ────────────────────────────────────────────────────────────
 
 _PROVIDER_CALLERS = {
@@ -389,6 +530,9 @@ _PROVIDER_CALLERS = {
     ProviderName.MISTRAL: _call_groq,
     ProviderName.GEMINI: _call_gemini,
     ProviderName.AGENTROUTER: _call_groq,
+    ProviderName.OPENAI: _call_groq,       # was registered in providers.py but had no caller
+    ProviderName.DEEPSEEK: _call_groq,     # OpenAI-compatible
+    ProviderName.CLAUDE_CLI: _call_claude_cli,
 }
 
 
@@ -637,16 +781,19 @@ async def _run_with_failover(
     - json_mode: whether JSON mode was enabled
     - thinking_disabled: whether thinking was disabled (Gemini only)
     """
-    providers = get_enabled_providers()
+    providers = get_enabled_providers(_preferred_providers.get())
     if not providers:
         raise ProviderError(
-            "No AI providers are configured. Set GROQ_API_KEY or MISTRAL_API_KEY or GEMINI_API_KEY.",
+            "No AI providers are configured. Set DEEPSEEK_API_KEY (or GROQ/MISTRAL/GEMINI keys).",
             provider="none",
         )
 
     last_exc: Exception = ProviderError("Failover exhausted — all providers failed.")
 
     for cfg in providers:
+        if _in_cooldown(cfg.name):
+            logger.info("Skipping provider %s (cooling down after a usage limit)", cfg.name.value)
+            continue
         for attempt in range(1, 3):
             t0 = time.monotonic()
             try:
@@ -784,6 +931,13 @@ async def _run_with_failover(
                         provider=cfg.name.value,
                         cause=exc,
                     ) from exc
+
+                if cfg.name == ProviderName.CLAUDE_CLI:
+                    # Retrying the CLI rarely helps (plan limit / not logged in);
+                    # go straight to the next provider and rest the CLI.
+                    if "limit" in str(exc).lower():
+                        _provider_cooldown_until[cfg.name] = time.monotonic() + _CLAUDE_CLI_COOLDOWN_SECONDS
+                    break
 
                 if attempt == 1:
                     await asyncio.sleep(_retry_delay_seconds(exc, attempt))

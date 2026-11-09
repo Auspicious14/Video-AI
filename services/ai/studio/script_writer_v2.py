@@ -20,7 +20,7 @@ from services.ai.studio.story_architect import story_architecture_context
 import logging
 from typing import Any
 import re
-from services.ai.client import generate_text_with_metadata
+from services.ai.client import generate_text_with_metadata, script_writing_providers
 from services.ai.prompts import load_prompt
 from services.ai.schemas import (
     DocumentaryMetadata,
@@ -594,15 +594,16 @@ async def _expand_section_narration(
     ).strip()
 
     try:
-        text, metadata = await generate_text_with_metadata(
-            prompt=prompt,
-            system=(
-                "You are a professional documentary narration writer. "
-                "Write only spoken narration. No JSON, no headings, no commentary."
-            ),
-            temperature=0.5,
-            max_tokens=_section_token_budget(max_words, attempt=1),
-        )
+        with script_writing_providers():
+            text, metadata = await generate_text_with_metadata(
+                prompt=prompt,
+                system=(
+                    "You are a professional documentary narration writer. "
+                    "Write only spoken narration. No JSON, no headings, no commentary."
+                ),
+                temperature=0.5,
+                max_tokens=_section_token_budget(max_words, attempt=1),
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[Narration Section] expand pass failed for %s: %s", section.title, exc)
         return None
@@ -888,10 +889,13 @@ async def _generate_section_with_validation(
     9 real LLM calls before giving up. Removed: retry logic now lives in
     exactly one place.
     """
-    text, metadata = await generate_text_with_metadata(
-        prompt=prompt,
-        system=system,
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
+    # Narration is the part viewers actually hear, so it uses the
+    # SCRIPT_PROVIDER_ORDER chain (e.g. Claude via `claude -p` → DeepSeek).
+    with script_writing_providers():
+        text, metadata = await generate_text_with_metadata(
+            prompt=prompt,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
     return _clean_narration_output(text), metadata
