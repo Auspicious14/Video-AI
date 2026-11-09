@@ -62,6 +62,49 @@ npx serve .     # serves on http://localhost:3000
 
 ---
 
+## LLM providers (script writing + everything else)
+
+The engine tries providers in order and falls through to the next one on rate
+limits, timeouts or an empty balance.
+
+| Job | Default order | Env var |
+|-----|---------------|---------|
+| Narration / script | `claude_cli` → `deepseek` → normal chain | `SCRIPT_PROVIDER_ORDER` |
+| Everything else (research, visual plan, titles, SEO, JSON) | `deepseek` → `groq` → `mistral` → `gemini` → `agentrouter` | `PROVIDER_ORDER` |
+
+Providers without a key are skipped automatically.
+
+```
+# DeepSeek — prepaid, pay-as-you-go (platform.deepseek.com)
+DEEPSEEK_API_KEY=sk-...
+DEEPSEEK_MODEL=deepseek-flash        # or deepseek-v4-pro (stronger, pricier)
+DEEPSEEK_THINKING=disabled           # "enabled" = slower, more tokens
+
+# Claude via your Claude plan (Pro/Max) using the Claude Code CLI — local only
+CLAUDE_CLI_ENABLED=true
+CLAUDE_CLI_MODEL=sonnet              # or opus
+# CLAUDE_CLI_PATH=claude             # if the binary is not on PATH
+# CLAUDE_CLI_TIMEOUT=300
+# CLAUDE_CLI_COOLDOWN_SECONDS=1800   # skip the CLI this long after a usage-limit error
+```
+
+### Using `claude -p` with your Claude plan
+
+1. Install Claude Code: `npm install -g @anthropic-ai/claude-code`
+2. Run `claude` once and log in with your Claude account (choose your
+   subscription, not an API key).
+3. Set `CLAUDE_CLI_ENABLED=true` in `.env`.
+
+Notes:
+- Make sure `ANTHROPIC_API_KEY` is **not** what you want to bill — the engine
+  removes it from the CLI's environment so the CLI uses your plan.
+- This draws on your plan's usage limits. When you hit the limit, narration
+  falls back to DeepSeek automatically and the CLI is rested for 30 minutes.
+- It runs on **your machine only**. It is for your own channel, not for
+  serving other users of VideoAI.ng — use the Claude API for that.
+
+---
+
 ## Deployment
 
 ### Backend (Render.com free tier)

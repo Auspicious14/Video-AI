@@ -4,11 +4,14 @@ services/ai/providers.py — Provider configuration and registry.
 Only this module (and client.py) know about specific AI providers.
 Business logic must never import from here directly.
 
-Provider Priority (failover order):
-  1. Groq  — fast, generous free tier
-  2. Mistral — fast, generous free tier
-  3. Gemini — Google, reliable fallback
-  4. Exception raised
+Provider Priority (failover order, PROVIDER_ORDER env):
+  1. DeepSeek — cheap pay-as-you-go, 1M context (primary when DEEPSEEK_API_KEY set)
+  2. Groq / Mistral / Gemini — free tiers, fallbacks
+  3. Exception raised
+
+Script writing can use a separate order (SCRIPT_PROVIDER_ORDER env), e.g.
+"claude_cli,deepseek" to write narration with your Claude subscription via
+`claude -p` and fall back to DeepSeek when the subscription limit is hit.
 
 Each provider exposes an OpenAI-compatible SDK interface.
 Gemini uses the google-genai SDK via a compatibility shim.
@@ -17,6 +20,7 @@ Gemini uses the google-genai SDK via a compatibility shim.
 from __future__ import annotations
 
 import os
+import shutil
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
@@ -36,6 +40,8 @@ class ProviderName(str, Enum):
     GEMINI = "gemini"
     AGENTROUTER = "agentrouter" 
     OPENAI = "openai"
+    DEEPSEEK = "deepseek"
+    CLAUDE_CLI = "claude_cli"   # local `claude -p` (Claude Code CLI, uses your Claude plan)
 
 
 # ── Provider descriptor ───────────────────────────────────────────────────────
@@ -90,22 +96,50 @@ class ProviderConfig:
 
 # ── Provider registry ─────────────────────────────────────────────────────────
 
-def _load_provider_order() -> list[ProviderName]:
-    """
-    Reads PROVIDER_ORDER from the environment.
+DEFAULT_PROVIDER_ORDER = "deepseek,groq,mistral,gemini,agentrouter"
+DEFAULT_SCRIPT_PROVIDER_ORDER = "claude_cli,deepseek"
 
-    Format: comma-separated names, e.g. "groq,gemini"
-    Defaults to groq → gemini.
-    """
-    raw = os.getenv("PROVIDER_ORDER", "groq,mistral,gemini,agentrouter")
+
+def _parse_order(raw: str) -> list[ProviderName]:
     names = [n.strip().lower() for n in raw.split(",") if n.strip()]
     order: list[ProviderName] = []
     for n in names:
         try:
             order.append(ProviderName(n))
         except ValueError:
-            logger.warning("Unknown provider in PROVIDER_ORDER: %r — ignored", n)
-    return order or [ProviderName.GROQ, ProviderName.MISTRAL, ProviderName.GEMINI, ProviderName.AGENTROUTER]
+            logger.warning("Unknown provider name %r — ignored", n)
+    return order
+
+
+def _load_provider_order() -> list[ProviderName]:
+    """
+    Reads PROVIDER_ORDER from the environment.
+
+    Format: comma-separated names, e.g. "deepseek,groq,gemini".
+    Only providers whose key/CLI is configured are actually used.
+    """
+    return _parse_order(os.getenv("PROVIDER_ORDER", DEFAULT_PROVIDER_ORDER)) or _parse_order(DEFAULT_PROVIDER_ORDER)
+
+
+def _load_script_provider_order() -> list[ProviderName]:
+    """
+    Reads SCRIPT_PROVIDER_ORDER — the providers tried FIRST for narration /
+    script writing. The normal PROVIDER_ORDER chain is still used after them
+    as a fallback. Set it to an empty string to disable the override.
+    """
+    return _parse_order(os.getenv("SCRIPT_PROVIDER_ORDER", DEFAULT_SCRIPT_PROVIDER_ORDER))
+
+
+def _claude_cli_marker() -> str:
+    """
+    The Claude CLI provider has no API key. We mark it "enabled" only when the
+    user opts in with CLAUDE_CLI_ENABLED=true AND the `claude` binary exists,
+    so nothing shells out unexpectedly.
+    """
+    if os.getenv("CLAUDE_CLI_ENABLED", "false").lower() != "true":
+        return ""
+    binary = os.getenv("CLAUDE_CLI_PATH", "claude")
+    return "cli" if shutil.which(binary) else ""
 
 
 def build_provider_registry() -> dict[ProviderName, ProviderConfig]:
@@ -114,6 +148,28 @@ def build_provider_registry() -> dict[ProviderName, ProviderConfig]:
     Called once at import time.
     """
     return {
+        ProviderName.DEEPSEEK: ProviderConfig(
+            name       = ProviderName.DEEPSEEK,
+            api_key    = os.getenv("DEEPSEEK_API_KEY", ""),
+            base_url   = "https://api.deepseek.com",
+            # Official current name is "deepseek-flash" (cheap, 1M context).
+            # Use DEEPSEEK_MODEL=deepseek-v4-pro for the stronger, pricier model.
+            model      = os.getenv("DEEPSEEK_MODEL", "deepseek-flash"),
+            json_model = os.getenv("DEEPSEEK_MODEL", "deepseek-flash"),
+            timeout    = 180.0,
+            max_output_tokens = 16384,
+            max_total_tokens = 1_000_000,
+        ),
+        ProviderName.CLAUDE_CLI: ProviderConfig(
+            name       = ProviderName.CLAUDE_CLI,
+            api_key    = _claude_cli_marker(),
+            base_url   = None,
+            model      = os.getenv("CLAUDE_CLI_MODEL", "sonnet"),
+            json_model = os.getenv("CLAUDE_CLI_MODEL", "sonnet"),
+            timeout    = float(os.getenv("CLAUDE_CLI_TIMEOUT", "300")),
+            max_output_tokens = 32000,
+            max_total_tokens = 200_000,
+        ),
         ProviderName.GROQ: ProviderConfig(
             name       = ProviderName.GROQ,
             api_key    = os.getenv("GROQ_API_KEY", ""),
@@ -172,6 +228,7 @@ def build_provider_registry() -> dict[ProviderName, ProviderConfig]:
 # Singleton registry — imported by client.py
 PROVIDER_REGISTRY: dict[ProviderName, ProviderConfig] = build_provider_registry()
 PROVIDER_ORDER: list[ProviderName] = _load_provider_order()
+SCRIPT_PROVIDER_ORDER: list[ProviderName] = _load_script_provider_order()
 
 _active_chain = [
     name.value for name in PROVIDER_ORDER
@@ -184,11 +241,20 @@ logger.info(
 )
 
 
-def get_enabled_providers() -> list[ProviderConfig]:
-    """Return providers in priority order, filtering out disabled ones."""
+def get_enabled_providers(preferred: Optional[list[ProviderName]] = None) -> list[ProviderConfig]:
+    """
+    Return providers in priority order, filtering out disabled ones.
+
+    ``preferred`` providers (if any) are tried first, followed by the normal
+    PROVIDER_ORDER chain with duplicates removed.
+    """
+    order: list[ProviderName] = []
+    for name in [*(preferred or []), *PROVIDER_ORDER]:
+        if name not in order:
+            order.append(name)
     enabled = [
         PROVIDER_REGISTRY[name]
-        for name in PROVIDER_ORDER
+        for name in order
         if name in PROVIDER_REGISTRY and PROVIDER_REGISTRY[name].enabled
     ]
     if not enabled:

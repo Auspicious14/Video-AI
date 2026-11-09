@@ -7,6 +7,7 @@ load_dotenv()
 # ── AI ────────────────────────────────────────────────────────────────────────
 GEMINI_API_KEY     = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY       = os.getenv("GROQ_API_KEY", "")
+DEEPSEEK_API_KEY   = os.getenv("DEEPSEEK_API_KEY", "")   # platform.deepseek.com — prepaid, cheap
 CEREBRAS_API_KEY   = os.getenv("CEREBRAS_API_KEY", "")
 MISTRAL_API_KEY    = os.getenv("MISTRAL_API_KEY", "")
 AGENTROUTER_API_KEY = os.getenv("AGENTROUTER_API_KEY", "")
