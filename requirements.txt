@@ -21,7 +21,7 @@ requests                        # For downloading images from fal.ai
 
 # ── AI — Audio / TTS ─────────────────────────────────────────────────────────
 gTTS>=2.5.0                     # free text-to-speech (fallback)
-pykokoro>=0.6.0                 # high-quality TTS (supports Python 3.10-3.13)
+pykokoro[cpu]>=0.10.13                 # high-quality TTS (supports Python 3.10-3.13)
 soundfile                       # WAV file handling
 numpy                           # array operations for audio
 torch                           # required for pykokoro (optional but recommended

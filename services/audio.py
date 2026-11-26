@@ -94,11 +94,22 @@ class KokoroProvider:
         self._ready = False
         self._init()
 
+    def _build(self, voice: str):
+        # pyrefly: ignore [missing-import]
+        from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
+
+        cfg = SynthesisConfig(
+            voice=voice,
+            generation=GenerationConfig(lang="en-us"),
+            long_text_split="sentence",  # sections are far longer than one model window
+        )
+        synth = KokoroSynthesizer(cfg)
+        synth.__enter__()  # kept open: model loads once, not per section
+        return synth
+
     def _init(self) -> None:
         try:
-            # pyrefly: ignore [missing-import]
-            from pykokoro import KokoroPipeline, PipelineConfig
-            self._pipeline = KokoroPipeline(PipelineConfig(voice=DEFAULT_KOKORO_VOICE))
+            self._pipeline = self._build(DEFAULT_KOKORO_VOICE)
             self._current_voice = DEFAULT_KOKORO_VOICE
             self._ready = True
             logger.info("Kokoro TTS initialised (%s)", DEFAULT_KOKORO_VOICE)
@@ -112,16 +123,7 @@ class KokoroProvider:
 
     def _ensure_voice(self, voice_key: str) -> None:
         resolved = VOICE_REGISTRY.get(voice_key, voice_key) if voice_key else DEFAULT_KOKORO_VOICE
-        if self._current_voice == resolved:
-            return
-        try:
-            # pyrefly: ignore [missing-import]
-            from pykokoro import KokoroPipeline, PipelineConfig
-            self._pipeline = KokoroPipeline(PipelineConfig(voice=resolved))
-            self._current_voice = resolved
-            logger.info("Kokoro voice changed to %s", resolved)
-        except Exception as exc:
-            logger.warning("Failed to switch Kokoro voice to %s: %s", resolved, exc)
+        self._current_voice = resolved  # voice is passed per request in generate()
 
     async def generate(self, narration: str, job_id: str, voice_id: Optional[str] = None) -> Path:
         if not self._ready or not self._pipeline:
@@ -139,10 +141,13 @@ class KokoroProvider:
         narration = _normalize_numbers_for_tts(narration)
 
         # Generate audio
-        res = self._pipeline.run(narration)
+        narration = " ".join(narration.split())  # drop stray whitespace/newlines (empty chunks error)
+        res = self._pipeline.synthesize_text(
+            narration, language="en-us", voice=self._current_voice or DEFAULT_KOKORO_VOICE
+        )
 
         # Write WAV — soundfile returns after the data is in the OS buffer.
-        sf.write(str(audio_path), res.audio, samplerate=res.sample_rate)
+        sf.write(str(audio_path), np.asarray(res.audio, dtype="float32"), samplerate=res.sample_rate)
 
         # Force filesystem sync: open + close flushes the kernel buffer on macOS.
         _flush_file(audio_path)
@@ -232,7 +237,7 @@ _kokoro = KokoroProvider()
 _gtts   = GTTSProvider()
 _edge   = EdgeTTSProvider()
 
-_PROVIDER_CHAIN = [_edge, _kokoro, _gtts]
+_PROVIDER_CHAIN = [_kokoro, _edge, _gtts]
 
 
 async def generate_audio(
@@ -245,8 +250,9 @@ async def generate_audio(
     Generate TTS audio, trying providers in order until one succeeds.
 
     Provider order (default):
-      1. Kokoro TTS  — high quality, offline
-      2. gTTS        — lightweight fallback
+      1. Kokoro TTS  — high quality, offline (needs onnxruntime + espeak-ng)
+      2. Edge TTS    — free neural voices, online
+      3. gTTS        — lightweight fallback
 
     Parameters
     ----------
