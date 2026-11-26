@@ -176,6 +176,24 @@ class GTTSProvider:
         return mp3_path
 
 
+class EdgeTTSProvider:
+    """Free Microsoft neural voices via edge-tts (needs internet, no API key)."""
+
+    name = "edge"
+    DEFAULT_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-AndrewNeural")
+
+    async def generate(self, narration: str, job_id: str, voice_id: Optional[str] = None) -> Path:
+        # pyrefly: ignore [missing-import]
+        import edge_tts
+
+        voice = voice_id if voice_id and "Neural" in voice_id else self.DEFAULT_VOICE
+        mp3_path = OUTPUT_DIR / f"{job_id}_audio.mp3"
+        await edge_tts.Communicate(narration, voice, rate="-4%").save(str(mp3_path))
+        _flush_file(mp3_path)
+        logger.info("Edge TTS audio generated | voice=%s path=%s", voice, mp3_path.name)
+        return mp3_path
+
+
 # ── OpenAI TTS provider ───────────────────────────────────────────────────────
 
 class OpenAITTSProvider:
@@ -212,8 +230,9 @@ class OpenAITTSProvider:
 # Module-level singleton — initialised once
 _kokoro = KokoroProvider()
 _gtts   = GTTSProvider()
+_edge   = EdgeTTSProvider()
 
-_PROVIDER_CHAIN = [_kokoro, _gtts]
+_PROVIDER_CHAIN = [_edge, _kokoro, _gtts]
 
 
 async def generate_audio(
@@ -249,7 +268,9 @@ async def generate_audio(
 
     chain: list = _PROVIDER_CHAIN
 
-    if preferred_provider == "kokoro":
+    if preferred_provider == "edge":
+        chain = [_edge, _gtts]
+    elif preferred_provider == "kokoro":
         chain = [_kokoro, _gtts]
     elif preferred_provider == "gtts":
         chain = [_gtts]

@@ -34,3 +34,4 @@ torch                           # required for pykokoro (optional but recommende
 # No Python package needed — called via subprocess.
 gradio_client>=0.9.0 # SadTalker + LatentSync HF Spaces caller
 requests
+edge-tts>=7.0.0              # free neural TTS voices

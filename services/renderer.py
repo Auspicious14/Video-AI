@@ -261,6 +261,7 @@ def create_text_overlay(
     color: tuple = (255, 255, 255, 255),
     box_color: tuple = (0, 0, 0, 160),
     max_width_fraction: float = 0.88,
+    bottom_margin: Optional[int] = None,
 ) -> Path:
     """Renders word-wrapped text onto a transparent PNG for FFmpeg overlay."""
     img  = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -284,15 +285,24 @@ def create_text_overlay(
     if current:
         lines.append(" ".join(current))
 
-    curr_y = y_pos
-    pad = 12
-    for line in lines:
-        w   = draw.textlength(line, font=font)
-        x   = int((width - w) / 2)
-        bbox = [x - pad, curr_y - pad, x + w + pad, curr_y + font_size + pad]
-        draw.rounded_rectangle(bbox, radius=8, fill=box_color)
-        draw.text((x, curr_y), line, font=font, fill=color)
-        curr_y += font_size + 14
+    pad = 14
+    step = int(font_size * 1.3)
+    total_h = step * len(lines)
+    if bottom_margin is not None:
+        y_pos = height - bottom_margin - total_h
+    # boxes first, then text, so a later box never clips the previous line
+    widths = [draw.textlength(line, font=font) for line in lines]
+    for i, w in enumerate(widths):
+        x = int((width - w) / 2)
+        top = y_pos + i * step
+        draw.rounded_rectangle(
+            [x - pad, top - pad // 2, x + w + pad, top + step - pad // 2],
+            radius=10, fill=box_color,
+        )
+    for i, (line, w) in enumerate(zip(lines, widths)):
+        x = int((width - w) / 2)
+        draw.text((x, y_pos + i * step), line, font=font, fill=color,
+                  stroke_width=max(2, font_size // 20), stroke_fill=(0, 0, 0, 255))
 
     img.save(output_path, format="PNG")
     return output_path
@@ -331,12 +341,13 @@ def create_subtitle_overlay(
         overlay_path = tmp_dir / f"sub_{idx:04d}.png"
         create_text_overlay(
             text, overlay_path,
-            font_size=font_size,
+            font_size=max(font_size, int(height * 0.056)),
             width=width,
             height=height,
-            y_pos=height - max(220, int(height * 0.17)),
+            bottom_margin=int(height * 0.07),
             color=(255, 255, 255, 255),
-            box_color=(0, 0, 0, 200),
+            box_color=(0, 0, 0, 215),
+            max_width_fraction=0.82,
         )
         inputs += ["-i", str(overlay_path)]
         out_label = f"sv{idx}"
@@ -409,8 +420,8 @@ def build_scene_clip(
         "-pix_fmt", "yuv420p",
         "-r", str(fps),           # output framerate — must match fps= in zoompan
         "-c:v", "libx264",
-        "-preset", "slow",
-        "-crf", "18",
+        "-preset", "veryfast",
+        "-crf", "20",
         str(output_path),
     ], capture_output=True)
 
@@ -440,8 +451,8 @@ def _normalize_clip(src, dst, duration, fps, width=W, height=H):
         "-r", str(fps),
         "-pix_fmt", "yuv420p",
         "-c:v", "libx264",
-        "-preset", "slow",
-        "-crf", "18",
+        "-preset", "veryfast",
+        "-crf", "20",
         str(dst),
     ], capture_output=True)
     if result.returncode != 0:
@@ -515,8 +526,8 @@ def build_final_video(
         f"[v1][2:v]overlay=enable='between(t,{cta_start:.3f},{actual_duration:.3f})'[vout]",
         "-map", "[vout]",
         "-c:v", "libx264",
-        "-preset", "slow",
-        "-crf", "18",
+        "-preset", "veryfast",
+        "-crf", "20",
         "-pix_fmt", "yuv420p",
         "-r", str(fps),
         str(overlaid),
@@ -732,8 +743,8 @@ def _chain_with_transitions(
         "-pix_fmt", "yuv420p",
         "-r", str(fps),
         "-c:v", "libx264",
-        "-preset", "slow",
-        "-crf", "18",
+        "-preset", "veryfast",
+        "-crf", "20",
         str(output_path),
     ]
 
@@ -764,8 +775,8 @@ def _chain_with_concat(
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
         "-r", str(fps),
-        "-preset", "slow",
-        "-crf", "18",
+        "-preset", "veryfast",
+        "-crf", "20",
         str(output_path),
     ], capture_output=True)
 
@@ -875,9 +886,10 @@ def create_fallback_frame(text: str, output_path: Path, width: int, height: int)
 
     img = Image.new("RGB", (width, height), (26, 26, 46))
     draw = ImageDraw.Draw(img)
-    font = _find_font(48)
+    fs = max(72, int(height * 0.09))
+    font = _find_font(fs)
     words, lines, current = text.split(), [], []
-    max_w = int(width * 0.8)
+    max_w = int(width * 0.78)
     for word in words:
         test = " ".join(current + [word])
         if draw.textlength(test, font=font) > max_w:
@@ -889,10 +901,11 @@ def create_fallback_frame(text: str, output_path: Path, width: int, height: int)
             current.append(word)
     if current:
         lines.append(" ".join(current))
-    y = (height - len(lines) * 60) // 2
+    lh = int(fs * 1.3)
+    y = (height - len(lines) * lh) // 2
     for line in lines:
         w = draw.textlength(line, font=font)
         draw.text(((width - w) / 2, y), line, font=font, fill=(255, 255, 255))
-        y += 60
+        y += lh
     img.save(output_path)
     return output_path

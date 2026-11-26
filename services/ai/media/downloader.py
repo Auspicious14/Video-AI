@@ -97,6 +97,9 @@
 
 from __future__ import annotations
 
+import time
+from urllib.parse import urlparse
+
 import hashlib
 import logging
 import mimetypes
@@ -252,16 +255,26 @@ class MediaDownloader:
     url: str,
     destination: Path):
 
-        headers = {
-            "User-Agent": "VideoAI/3.0"
-        }
-
-        response = requests.get(
-            url,
-            stream=True,
-            headers=headers,
-            timeout=60,
+        host = urlparse(url).netloc.lower()
+        ua = (
+            "SecondOrderDocumentaryBot/1.0 (+https://auspicious.vercel.app; "
+            "mailto:uthmanabdulganiyu2019@gmail.com)"
+            if host.endswith(("wikimedia.org", "wikipedia.org"))
+            else "VideoAI/3.0"
         )
+        headers = {"User-Agent": ua}
+
+        response = None
+        for attempt in range(5):
+            response = requests.get(url, stream=True, headers=headers, timeout=60)
+            if response.status_code != 429:
+                break
+            try:
+                wait = min(float(response.headers.get("Retry-After", "")), 30)
+            except ValueError:
+                wait = 2 ** attempt * 2
+            logger.warning("[Downloader] 429 from %s, waiting %.0fs", host, wait)
+            time.sleep(wait)
 
         response.raise_for_status()
 

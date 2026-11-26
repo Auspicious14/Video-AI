@@ -1,0 +1,324 @@
+diff --git a/requirements.txt b/requirements.txt
+index 1deef75..28e615e 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -34,3 +34,4 @@ torch                           # required for pykokoro (optional but recommende
+ # No Python package needed — called via subprocess.
+ gradio_client>=0.9.0 # SadTalker + LatentSync HF Spaces caller
+ requests
++edge-tts>=7.0.0              # free neural TTS voices
+diff --git a/services/ai/media/downloader.py b/services/ai/media/downloader.py
+index 3368338..3a04d43 100644
+--- a/services/ai/media/downloader.py
++++ b/services/ai/media/downloader.py
+@@ -97,6 +97,9 @@
+ 
+ from __future__ import annotations
+ 
++import time
++from urllib.parse import urlparse
++
+ import hashlib
+ import logging
+ import mimetypes
+@@ -252,16 +255,26 @@ class MediaDownloader:
+     url: str,
+     destination: Path):
+ 
+-        headers = {
+-            "User-Agent": "VideoAI/3.0"
+-        }
+-
+-        response = requests.get(
+-            url,
+-            stream=True,
+-            headers=headers,
+-            timeout=60,
++        host = urlparse(url).netloc.lower()
++        ua = (
++            "SecondOrderDocumentaryBot/1.0 (+https://auspicious.vercel.app; "
++            "mailto:uthmanabdulganiyu2019@gmail.com)"
++            if host.endswith(("wikimedia.org", "wikipedia.org"))
++            else "VideoAI/3.0"
+         )
++        headers = {"User-Agent": ua}
++
++        response = None
++        for attempt in range(5):
++            response = requests.get(url, stream=True, headers=headers, timeout=60)
++            if response.status_code != 429:
++                break
++            try:
++                wait = min(float(response.headers.get("Retry-After", "")), 30)
++            except ValueError:
++                wait = 2 ** attempt * 2
++            logger.warning("[Downloader] 429 from %s, waiting %.0fs", host, wait)
++            time.sleep(wait)
+ 
+         response.raise_for_status()
+ 
+diff --git a/services/ai/media/providers/pexels.py b/services/ai/media/providers/pexels.py
+index d0cd37c..730e916 100644
+--- a/services/ai/media/providers/pexels.py
++++ b/services/ai/media/providers/pexels.py
+@@ -14,6 +14,21 @@ from services.ai.media.visual_intent import VisualIntent
+ logger = logging.getLogger(__name__)
+ 
+ 
++
++def _best_video_file(files):
++    """Best landscape mp4: >=1280 wide, closest to 1920, aspect >= 1.5. None if none qualify."""
++    ok = []
++    for f in files:
++        w, h = f.get("width") or 0, f.get("height") or 0
++        if f.get("file_type") != "video/mp4" or not f.get("link") or not h:
++            continue
++        if w >= 1280 and w / h >= 1.5:
++            ok.append({"link": f["link"], "width": w, "height": h})
++    if not ok:
++        return None
++    return min(ok, key=lambda f: abs(f["width"] - 1920))
++
++
+ class PexelsProvider(MediaProvider):
+ 
+     @property
+@@ -108,34 +123,13 @@ class PexelsProvider(MediaProvider):
+ 
+                 if wants_video:
+ 
+-                    file_url = None
+-
+-                    for video in item.get("video_files", []):
+-
+-                        if (
+-                            video.get("file_type")
+-                            == "video/mp4"
+-                        ):
+-
+-                            file_url = video.get("link")
+-
+-                            width = video.get(
+-                                "width",
+-                                width,
+-                            )
+-
+-                            height = video.get(
+-                                "height",
+-                                height,
+-                            )
+-
+-                            aspect = (
+-                                width / height
+-                                if height
+-                                else 9 / 16
+-                            )
+-
+-                            break
++                    best = _best_video_file(item.get("video_files", []))
++                    if best is None:
++                        continue  # no landscape HD file: skip (blur / portrait clips)
++                    file_url = best["link"]
++                    width = best["width"]
++                    height = best["height"]
++                    aspect = width / height
+ 
+                     if not file_url:
+                         continue
+diff --git a/services/audio.py b/services/audio.py
+index 60bee22..04a582a 100644
+--- a/services/audio.py
++++ b/services/audio.py
+@@ -176,6 +176,24 @@ class GTTSProvider:
+         return mp3_path
+ 
+ 
++class EdgeTTSProvider:
++    """Free Microsoft neural voices via edge-tts (needs internet, no API key)."""
++
++    name = "edge"
++    DEFAULT_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-AndrewNeural")
++
++    async def generate(self, narration: str, job_id: str, voice_id: Optional[str] = None) -> Path:
++        # pyrefly: ignore [missing-import]
++        import edge_tts
++
++        voice = voice_id if voice_id and "Neural" in voice_id else self.DEFAULT_VOICE
++        mp3_path = OUTPUT_DIR / f"{job_id}_audio.mp3"
++        await edge_tts.Communicate(narration, voice, rate="-4%").save(str(mp3_path))
++        _flush_file(mp3_path)
++        logger.info("Edge TTS audio generated | voice=%s path=%s", voice, mp3_path.name)
++        return mp3_path
++
++
+ # ── OpenAI TTS provider ───────────────────────────────────────────────────────
+ 
+ class OpenAITTSProvider:
+@@ -212,8 +230,9 @@ class OpenAITTSProvider:
+ # Module-level singleton — initialised once
+ _kokoro = KokoroProvider()
+ _gtts   = GTTSProvider()
++_edge   = EdgeTTSProvider()
+ 
+-_PROVIDER_CHAIN = [_kokoro, _gtts]
++_PROVIDER_CHAIN = [_edge, _kokoro, _gtts]
+ 
+ 
+ async def generate_audio(
+@@ -249,7 +268,9 @@ async def generate_audio(
+ 
+     chain: list = _PROVIDER_CHAIN
+ 
+-    if preferred_provider == "kokoro":
++    if preferred_provider == "edge":
++        chain = [_edge, _gtts]
++    elif preferred_provider == "kokoro":
+         chain = [_kokoro, _gtts]
+     elif preferred_provider == "gtts":
+         chain = [_gtts]
+diff --git a/services/renderer.py b/services/renderer.py
+index 6908393..a40e620 100644
+--- a/services/renderer.py
++++ b/services/renderer.py
+@@ -261,6 +261,7 @@ def create_text_overlay(
+     color: tuple = (255, 255, 255, 255),
+     box_color: tuple = (0, 0, 0, 160),
+     max_width_fraction: float = 0.88,
++    bottom_margin: Optional[int] = None,
+ ) -> Path:
+     """Renders word-wrapped text onto a transparent PNG for FFmpeg overlay."""
+     img  = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+@@ -284,15 +285,24 @@ def create_text_overlay(
+     if current:
+         lines.append(" ".join(current))
+ 
+-    curr_y = y_pos
+-    pad = 12
+-    for line in lines:
+-        w   = draw.textlength(line, font=font)
+-        x   = int((width - w) / 2)
+-        bbox = [x - pad, curr_y - pad, x + w + pad, curr_y + font_size + pad]
+-        draw.rounded_rectangle(bbox, radius=8, fill=box_color)
+-        draw.text((x, curr_y), line, font=font, fill=color)
+-        curr_y += font_size + 14
++    pad = 14
++    step = int(font_size * 1.3)
++    total_h = step * len(lines)
++    if bottom_margin is not None:
++        y_pos = height - bottom_margin - total_h
++    # boxes first, then text, so a later box never clips the previous line
++    widths = [draw.textlength(line, font=font) for line in lines]
++    for i, w in enumerate(widths):
++        x = int((width - w) / 2)
++        top = y_pos + i * step
++        draw.rounded_rectangle(
++            [x - pad, top - pad // 2, x + w + pad, top + step - pad // 2],
++            radius=10, fill=box_color,
++        )
++    for i, (line, w) in enumerate(zip(lines, widths)):
++        x = int((width - w) / 2)
++        draw.text((x, y_pos + i * step), line, font=font, fill=color,
++                  stroke_width=max(2, font_size // 20), stroke_fill=(0, 0, 0, 255))
+ 
+     img.save(output_path, format="PNG")
+     return output_path
+@@ -331,12 +341,13 @@ def create_subtitle_overlay(
+         overlay_path = tmp_dir / f"sub_{idx:04d}.png"
+         create_text_overlay(
+             text, overlay_path,
+-            font_size=font_size,
++            font_size=max(font_size, int(height * 0.056)),
+             width=width,
+             height=height,
+-            y_pos=height - max(220, int(height * 0.17)),
++            bottom_margin=int(height * 0.07),
+             color=(255, 255, 255, 255),
+-            box_color=(0, 0, 0, 200),
++            box_color=(0, 0, 0, 215),
++            max_width_fraction=0.82,
+         )
+         inputs += ["-i", str(overlay_path)]
+         out_label = f"sv{idx}"
+@@ -409,8 +420,8 @@ def build_scene_clip(
+         "-pix_fmt", "yuv420p",
+         "-r", str(fps),           # output framerate — must match fps= in zoompan
+         "-c:v", "libx264",
+-        "-preset", "slow",
+-        "-crf", "18",
++        "-preset", "veryfast",
++        "-crf", "20",
+         str(output_path),
+     ], capture_output=True)
+ 
+@@ -440,8 +451,8 @@ def _normalize_clip(src, dst, duration, fps, width=W, height=H):
+         "-r", str(fps),
+         "-pix_fmt", "yuv420p",
+         "-c:v", "libx264",
+-        "-preset", "slow",
+-        "-crf", "18",
++        "-preset", "veryfast",
++        "-crf", "20",
+         str(dst),
+     ], capture_output=True)
+     if result.returncode != 0:
+@@ -515,8 +526,8 @@ def build_final_video(
+         f"[v1][2:v]overlay=enable='between(t,{cta_start:.3f},{actual_duration:.3f})'[vout]",
+         "-map", "[vout]",
+         "-c:v", "libx264",
+-        "-preset", "slow",
+-        "-crf", "18",
++        "-preset", "veryfast",
++        "-crf", "20",
+         "-pix_fmt", "yuv420p",
+         "-r", str(fps),
+         str(overlaid),
+@@ -732,8 +743,8 @@ def _chain_with_transitions(
+         "-pix_fmt", "yuv420p",
+         "-r", str(fps),
+         "-c:v", "libx264",
+-        "-preset", "slow",
+-        "-crf", "18",
++        "-preset", "veryfast",
++        "-crf", "20",
+         str(output_path),
+     ]
+ 
+@@ -764,8 +775,8 @@ def _chain_with_concat(
+         "-c:v", "libx264",
+         "-pix_fmt", "yuv420p",
+         "-r", str(fps),
+-        "-preset", "slow",
+-        "-crf", "18",
++        "-preset", "veryfast",
++        "-crf", "20",
+         str(output_path),
+     ], capture_output=True)
+ 
+@@ -875,9 +886,10 @@ def create_fallback_frame(text: str, output_path: Path, width: int, height: int)
+ 
+     img = Image.new("RGB", (width, height), (26, 26, 46))
+     draw = ImageDraw.Draw(img)
+-    font = _find_font(48)
++    fs = max(72, int(height * 0.09))
++    font = _find_font(fs)
+     words, lines, current = text.split(), [], []
+-    max_w = int(width * 0.8)
++    max_w = int(width * 0.78)
+     for word in words:
+         test = " ".join(current + [word])
+         if draw.textlength(test, font=font) > max_w:
+@@ -889,10 +901,11 @@ def create_fallback_frame(text: str, output_path: Path, width: int, height: int)
+             current.append(word)
+     if current:
+         lines.append(" ".join(current))
+-    y = (height - len(lines) * 60) // 2
++    lh = int(fs * 1.3)
++    y = (height - len(lines) * lh) // 2
+     for line in lines:
+         w = draw.textlength(line, font=font)
+         draw.text(((width - w) / 2, y), line, font=font, fill=(255, 255, 255))
+-        y += 60
++        y += lh
+     img.save(output_path)
+     return output_path
+\ No newline at end of file

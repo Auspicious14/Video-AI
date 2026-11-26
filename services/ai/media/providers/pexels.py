@@ -14,6 +14,21 @@ from services.ai.media.visual_intent import VisualIntent
 logger = logging.getLogger(__name__)
 
 
+
+def _best_video_file(files):
+    """Best landscape mp4: >=1280 wide, closest to 1920, aspect >= 1.5. None if none qualify."""
+    ok = []
+    for f in files:
+        w, h = f.get("width") or 0, f.get("height") or 0
+        if f.get("file_type") != "video/mp4" or not f.get("link") or not h:
+            continue
+        if w >= 1280 and w / h >= 1.5:
+            ok.append({"link": f["link"], "width": w, "height": h})
+    if not ok:
+        return None
+    return min(ok, key=lambda f: abs(f["width"] - 1920))
+
+
 class PexelsProvider(MediaProvider):
 
     @property
@@ -108,34 +123,13 @@ class PexelsProvider(MediaProvider):
 
                 if wants_video:
 
-                    file_url = None
-
-                    for video in item.get("video_files", []):
-
-                        if (
-                            video.get("file_type")
-                            == "video/mp4"
-                        ):
-
-                            file_url = video.get("link")
-
-                            width = video.get(
-                                "width",
-                                width,
-                            )
-
-                            height = video.get(
-                                "height",
-                                height,
-                            )
-
-                            aspect = (
-                                width / height
-                                if height
-                                else 9 / 16
-                            )
-
-                            break
+                    best = _best_video_file(item.get("video_files", []))
+                    if best is None:
+                        continue  # no landscape HD file: skip (blur / portrait clips)
+                    file_url = best["link"]
+                    width = best["width"]
+                    height = best["height"]
+                    aspect = width / height
 
                     if not file_url:
                         continue
