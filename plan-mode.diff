@@ -1,0 +1,1146 @@
+diff --git a/PLAN_MODE.md b/PLAN_MODE.md
+new file mode 100644
+index 0000000..fab68ca
+--- /dev/null
++++ b/PLAN_MODE.md
+@@ -0,0 +1,128 @@
++# Plan-file mode
++
++Render a complete documentary from a hand-written (or chat-written) `production.json`
++with **no LLM calls and no LLM API keys**. The studio pipeline's agent stages
++(topic, research, story, script, QA, visual planning) are skipped; the plan file
++replaces their output and the existing stages take over:
++
++```
++production.json -> asset retrieval per scene -> TTS per section -> render_video -> MP4
++```
++
++It reuses `services/ai/media/providers/*` (+ `MediaDownloader`), `services/audio.py`
++(Kokoro, gTTS fallback) and `services/renderer.py` unchanged.
++
++## Run
++
++```bash
++# validate + summary (no network, no ffmpeg, no keys)
++python generate_from_plan.py examples/production.example.json --dry-run
++
++# real run
++python generate_from_plan.py path/to/production.json --out outputs/my_video.mp4
++```
++
++`--out` defaults to `outputs/<plan file name>.mp4`. Next to the video a
++`<out>.credits.json` is written with the title/description/tags and, per scene,
++the source provider, URL, author and licence (use it for YouTube attribution).
++
++Exit codes: `0` ok, `1` ffmpeg missing, `2` invalid plan.
++
++## Environment
++
++| Variable | Needed for |
++|---|---|
++| `PEXELS_API_KEY` | `pexels_image` / `pexels_video` scenes (free key at pexels.com/api) |
++| none | `wikimedia`, `url`, `text_card`, TTS (Kokoro offline, gTTS needs internet) |
++
++Also required on the machine: `ffmpeg` and `ffprobe` on PATH. No `GEMINI_*`, `GROQ_*`,
++`DEEPSEEK_*` etc. are read on this path. (Some shared modules import the LLM client
++module at import time; that import needs no key, and tests assert no LLM call is made.)
++
++If a scene's asset cannot be fetched (no key, no results, download error, bad image)
++it becomes a **text card** with the scene's `text`, else `caption`, else `query`, and a
++warning is printed. The render never aborts because of one bad asset.
++
++## Schema
++
++Unknown keys are rejected (typos fail validation).
++
++`ProductionPlan`
++
++| Field | Type | Default | Notes |
++|---|---|---|---|
++| `title` | string | required | |
++| `description` | string | `""` | goes to the credits sidecar |
++| `tags` | string[] | `[]` | goes to the credits sidecar |
++| `aspect_ratio` | `"16:9"` \| `"9:16"` \| `"1:1"` | `"16:9"` | what `renderer.dimensions_for_aspect_ratio` supports (1920x1080 / 1080x1920 / 1080x1080) |
++| `voice` | string \| null | engine default (`am_adam`) | Kokoro voice id (`am_adam`, `bf_emma`, ...) or a `VOICE_REGISTRY` key (`male_deep`). Ignored by gTTS |
++| `music` | string \| null | none | local path (relative to the plan file) or http(s) URL; mixed at -18 dB under the narration |
++| `hook` | string | `""` | text overlaid for the first 3 s |
++| `cta` | string | `""` | text overlaid for the last 5 s |
++| `subtitles` | bool | `true` | burned-in captions timed from the narration |
++| `sections` | Section[] (>=1) | required | |
++
++`Section`: `title` (string), `narration` (spoken text, non-blank), `scenes` (Scene[], >=1).
++
++`Scene`
++
++| Field | Type | Notes |
++|---|---|---|
++| `kind` | see below | required |
++| `query` | string | required for `wikimedia`, `pexels_image`, `pexels_video` |
++| `url` | string | required for `url` (http(s) URL, `file://`, absolute path, or path relative to the plan file) |
++| `text` | string | required for `text_card`; fallback card text for other kinds |
++| `caption` | string | free-form note, **not rendered**; stored in the credits sidecar |
++| `duration_weight` | number > 0 | default `1`; relative share of the section's narration time |
++
++### Visual kinds
++
++| Kind | Source | Notes |
++|---|---|---|
++| `wikimedia` | Wikimedia Commons image search | no key; JPEG/PNG/GIF/WebP only; prefers results >= 1280 px wide; keep queries short (2-6 keywords) |
++| `pexels_image` | Pexels photo search | needs `PEXELS_API_KEY` |
++| `pexels_video` | Pexels video search | needs `PEXELS_API_KEY`; first MP4 file Pexels lists is used, looped/trimmed to the scene length |
++| `url` | direct URL or local file | treated as video if the extension is `.mp4 .mov .webm .mkv .m4v`, otherwise as an image |
++| `text_card` | generated offline | `text` on a dark background (renderer's fallback frame) |
++
++Stills get the renderer's Ken Burns motion; videos are scaled onto a blurred
++background (letterbox-safe) and looped if shorter than the scene. The same asset is
++never reused for two search scenes in one run.
++
++## Timing
++
++Each section is voiced separately, so its real audio length is known. A section's
++duration is divided among its scenes by `duration_weight`. Scene clips are padded by
++the renderer's 0.4 s crossfade so every scene starts where its narration share starts
++and the video ends with the audio. Aim for scenes of at least ~2 s (dry-run flags
++shorter ones). Estimated length in `--dry-run` assumes 150 words per minute.
++
++## Not supported / limitations
++
++- `caption` is not drawn on screen (the renderer has no per-scene caption overlay).
++- No AI image generation, no Google/Unsplash/Pixabay kinds (providers exist in the repo
++  but are not exposed here); use `url` for anything else.
++- Transitions (always 0.4 s fade) and motion effects are chosen by the renderer.
++- Thumbnail is not rendered; write it separately.
++- Narration is not checked against the visuals; the plan is trusted as written.
++
++## Minimal example
++
++```json
++{
++  "title": "Demo",
++  "sections": [
++    {
++      "title": "Intro",
++      "narration": "This is a short test of plan mode.",
++      "scenes": [
++        {"kind": "text_card", "text": "Plan mode"},
++        {"kind": "wikimedia", "query": "mountain lake", "duration_weight": 2}
++      ]
++    }
++  ]
++}
++```
++
++See `examples/production.example.json` for a full ~85 s sample. Tests:
++`python3 -m pytest -q tests/test_plan_mode.py`.
+diff --git a/examples/production.example.json b/examples/production.example.json
+new file mode 100644
+index 0000000..a076efd
+--- /dev/null
++++ b/examples/production.example.json
+@@ -0,0 +1,39 @@
++{
++  "title": "How Lighthouses Guide Ships Home",
++  "description": "A short look at how lighthouses work, from ancient fire towers to the lens that changed everything.",
++  "tags": ["lighthouse", "history", "engineering", "documentary"],
++  "aspect_ratio": "16:9",
++  "voice": "am_adam",
++  "hook": "How do you guide a ship through the dark?",
++  "cta": "Subscribe for more short documentaries.",
++  "subtitles": true,
++  "sections": [
++    {
++      "title": "The Problem",
++      "narration": "For as long as people have sailed, the coast has been the most dangerous part of the journey. Rocks hide just below the surface, storms strip away every landmark, and at night a sailor can see almost nothing. Long before modern navigation, the answer was simple and bold: build something tall, and light a fire at the top of it.",
++      "scenes": [
++        { "kind": "text_card", "text": "How do you guide a ship through the dark?", "duration_weight": 1 },
++        { "kind": "wikimedia", "query": "rocky coast storm waves", "caption": "Dangerous coastline", "duration_weight": 2 },
++        { "kind": "pexels_video", "query": "ocean waves at night", "duration_weight": 2 }
++      ]
++    },
++    {
++      "title": "The First Towers",
++      "narration": "One of the most famous early examples stood at Alexandria, in Egypt, on the island of Pharos. Built in the third century before the common era, it was among the tallest structures of its time, and its name became the word for lighthouse in several languages. For centuries, these towers burned wood, coal, and later oil, but the light they gave off was weak and scattered in every direction.",
++      "scenes": [
++        { "kind": "wikimedia", "query": "Pharos of Alexandria lighthouse illustration", "duration_weight": 2 },
++        { "kind": "wikimedia", "query": "old lighthouse tower coast", "duration_weight": 1 },
++        { "kind": "pexels_image", "query": "lighthouse at dusk", "duration_weight": 1 }
++      ]
++    },
++    {
++      "title": "A Better Lens",
++      "narration": "Everything changed in the early eighteen hundreds, when the French physicist Augustin-Jean Fresnel designed a new kind of lens. Instead of one thick block of glass, it used rings of carefully shaped prisms that bent the light into a single powerful beam. Far less light was wasted, and that beam could be seen from many miles away. Today, satellites do most of the guiding, but the lighthouse still stands as proof that a good idea, well built, can keep shining for centuries.",
++      "scenes": [
++        { "kind": "wikimedia", "query": "Fresnel lens lighthouse", "duration_weight": 2 },
++        { "kind": "pexels_video", "query": "lighthouse beam night sky", "duration_weight": 2 },
++        { "kind": "text_card", "text": "A good idea, well built, can shine for centuries.", "duration_weight": 1 }
++      ]
++    }
++  ]
++}
+diff --git a/generate_from_plan.py b/generate_from_plan.py
+new file mode 100644
+index 0000000..fa178a2
+--- /dev/null
++++ b/generate_from_plan.py
+@@ -0,0 +1,60 @@
++"""Plan-file mode CLI: render a documentary from production.json with NO LLM calls.
++
++    python generate_from_plan.py path/to/production.json [--out outputs/x.mp4] [--dry-run]
++
++See PLAN_MODE.md.
++"""
++
++from __future__ import annotations
++
++import argparse
++import asyncio
++import logging
++import shutil
++import sys
++from pathlib import Path
++
++from pydantic import ValidationError
++
++# Only the dependency-light schema module is imported at top level, so --dry-run
++# works with no ffmpeg / TTS / network / API keys.
++from services.plan_mode.schema import format_summary, load_plan
++
++
++def main(argv: list[str] | None = None) -> int:
++    parser = argparse.ArgumentParser(description="Render a documentary from a production plan (no LLM).")
++    parser.add_argument("plan", type=Path, help="path to production.json")
++    parser.add_argument("--out", type=Path, default=None, help="output mp4 (default: outputs/<plan-name>.mp4)")
++    parser.add_argument("--dry-run", action="store_true", help="validate and summarise only; no network")
++    args = parser.parse_args(argv)
++
++    try:
++        plan = load_plan(args.plan)
++    except (ValidationError, ValueError, OSError) as exc:
++        print(f"Invalid plan: {exc}", file=sys.stderr)
++        return 2
++
++    print(format_summary(plan))
++    if args.dry_run:
++        print("\nDry run OK - plan is valid.")
++        return 0
++
++    if not shutil.which("ffmpeg"):
++        print("ffmpeg not found on PATH.", file=sys.stderr)
++        return 1
++
++    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
++    out = args.out or Path("outputs") / f"{args.plan.stem}.mp4"
++
++    from services.plan_mode.runner import run_plan  # heavy imports only for a real run
++
++    result = asyncio.run(run_plan(plan, out, plan_dir=args.plan.resolve().parent))
++    print(f"\nDone: {result.video_path.resolve()} ({result.duration_seconds:.0f}s)")
++    print(f"Credits/metadata: {result.credits_path}")
++    for w in result.warnings:
++        print(f"warning: {w}")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/services/plan_mode/__init__.py b/services/plan_mode/__init__.py
+new file mode 100644
+index 0000000..f7152b4
+--- /dev/null
++++ b/services/plan_mode/__init__.py
+@@ -0,0 +1,7 @@
++"""Plan-file mode: render a documentary from a hand-written production.json.
++
++No LLM calls happen anywhere under this package. See PLAN_MODE.md.
++Importing this package is intentionally cheap; the heavy pieces (asset
++providers, TTS, ffmpeg) live in ``services.plan_mode.runner`` and are only
++imported by a real (non --dry-run) run.
++"""
+diff --git a/services/plan_mode/runner.py b/services/plan_mode/runner.py
+new file mode 100644
+index 0000000..ebde0ad
+--- /dev/null
++++ b/services/plan_mode/runner.py
+@@ -0,0 +1,328 @@
++"""Plan-mode runner: production.json -> assets -> TTS -> MP4. No LLM calls.
++
++Reuses the existing downstream stages unchanged:
++  * services.ai.media.providers.{wikimedia,pexels}  asset search
++  * services.ai.media.downloader.MediaDownloader    asset download / local files
++  * services.audio.generate_audio / get_audio_duration   TTS (Kokoro -> gTTS)
++  * services.renderer.render_video                  Ken Burns / clip / xfade / subtitles / mux
++
++This is the same hand-off the studio pipeline performs in
++``_render_studio_video`` (image_paths + ai_clip_paths + audio + subtitle_lines),
++minus every LLM agent stage in front of it.
++"""
++
++from __future__ import annotations
++
++import asyncio
++import json
++import logging
++import re
++import shutil
++import subprocess
++import uuid
++from dataclasses import dataclass, field
++from pathlib import Path
++
++from config import OUTPUT_DIR
++from services.plan_mode.schema import ProductionPlan, Scene, VisualKind, split_durations
++
++logger = logging.getLogger(__name__)
++
++# render_video() hard-codes 0.4s xfade between scenes (see renderer.render_video).
++TRANSITION_SECONDS = 0.4
++VIDEO_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
++
++
++@dataclass
++class ResolvedScene:
++    path: Path
++    is_video: bool
++    source: str                       # provider name, "url", "text_card" or "fallback"
++    section: str
++    scene: Scene
++    credit: dict = field(default_factory=dict)
++    warning: str | None = None
++
++
++@dataclass
++class PlanRunResult:
++    video_path: Path
++    duration_seconds: float
++    warnings: list[str]
++    credits_path: Path
++
++
++# ── Assets ───────────────────────────────────────────────────────────────────
++
++def _intent(query: str, want_video: bool):
++    from services.ai.media.asset_types import AssetKind
++    from services.ai.media.visual_intent import SubjectType, VisualIntent
++
++    return VisualIntent(
++        subject=query,
++        subject_type=SubjectType.OBJECT,
++        action="",
++        search_keywords=[query],  # concise_search_query uses these verbatim
++        preferred_asset_kind=AssetKind.STOCK_VIDEO if want_video else AssetKind.STOCK_IMAGE,
++    )
++
++
++def _pick(candidates, used_urls: set[str], want_video: bool):
++    """First unused candidate; for images prefer >=1280px wide (old scans look bad)."""
++    fresh = [c for c in candidates if c.url not in used_urls]
++    if not want_video:
++        big = [c for c in fresh if (c.width or 0) >= 1280]
++        fresh = big or fresh
++    return fresh[0] if fresh else None
++
++
++def _looks_like_video(url: str) -> bool:
++    return Path(url.split("?")[0]).suffix.lower() in VIDEO_SUFFIXES
++
++
++def _image_ok(path: Path) -> bool:
++    from PIL import Image
++
++    try:
++        with Image.open(path) as im:
++            im.verify()
++        return True
++    except Exception:
++        return False
++
++
++def _text_card(text: str, dest: Path, width: int, height: int) -> Path:
++    from services.renderer import create_fallback_frame
++
++    create_fallback_frame(text or "…", dest, width, height)
++    return dest
++
++
++async def _download(asset):
++    from services.ai.media.downloader import MediaDownloader
++
++    return (await asyncio.to_thread(MediaDownloader().download, asset)).local_path
++
++
++async def resolve_scene(
++    scene: Scene,
++    *,
++    section_title: str,
++    index: int,
++    work_dir: Path,
++    plan_dir: Path,
++    width: int,
++    height: int,
++    used_urls: set[str],
++) -> ResolvedScene:
++    """Turn one scene spec into a local file. Never raises: failures become a text card."""
++    card_path = work_dir / f"card_{index:03d}.png"
++
++    if scene.kind is VisualKind.TEXT_CARD:
++        _text_card(scene.text or "", card_path, width, height)
++        return ResolvedScene(card_path, False, "text_card", section_title, scene)
++
++    try:
++        from services.ai.media.asset import MediaAsset
++        from services.ai.media.asset_types import AssetKind
++
++        if scene.kind is VisualKind.URL:
++            url = scene.url or ""
++            if not url.startswith(("http://", "https://", "file://")):
++                local = Path(url).expanduser()
++                url = str(local if local.is_absolute() else (plan_dir / local).resolve())
++            is_video = _looks_like_video(url)
++            asset = MediaAsset(
++                url=url,
++                kind=AssetKind.STOCK_VIDEO if is_video else AssetKind.STOCK_IMAGE,
++                provider="url",
++                provider_id=url,
++                title=scene.caption or "",
++            )
++            credit = {"provider": "url", "url": scene.url}
++        else:
++            want_video = scene.kind is VisualKind.PEXELS_VIDEO
++            if scene.kind is VisualKind.WIKIMEDIA:
++                from services.ai.media.providers.wikimedia import WikimediaProvider as Provider
++            else:
++                from services.ai.media.providers.pexels import PexelsProvider as Provider
++            provider = Provider()
++            if not provider.is_configured():
++                raise RuntimeError("PEXELS_API_KEY is not set")
++            candidates = await provider.search(_intent(scene.query or "", want_video), limit=8)
++            asset = _pick(candidates, used_urls, want_video)
++            if asset is None:
++                raise RuntimeError(f"no usable results for query '{scene.query}'")
++            is_video = want_video
++            credit = {
++                "provider": asset.provider,
++                "url": asset.url,
++                "title": asset.title,
++                "author": asset.author,
++                "licensing": asset.licensing,
++            }
++
++        path = await _download(asset)
++        if not is_video and not _image_ok(path):
++            raise RuntimeError(f"downloaded file is not a valid image: {path.name}")
++        used_urls.add(asset.url)
++        return ResolvedScene(path, is_video, asset.provider, section_title, scene, credit)
++
++    except Exception as exc:  # noqa: BLE001 - any failure must degrade to a card, not abort the render
++        msg = f"scene {index} ({scene.kind.value}) fell back to a text card: {exc}"
++        logger.warning(msg)
++        _text_card(scene.fallback_text or section_title, card_path, width, height)
++        return ResolvedScene(card_path, False, "fallback", section_title, scene, warning=msg)
++
++
++# ── Audio ────────────────────────────────────────────────────────────────────
++
++def _concat_audio(parts: list[Path], dest: Path) -> Path:
++    """Join per-section narration (mixed wav/mp3 is fine) into one mono 44.1 kHz wav."""
++    if len(parts) == 1:
++        return parts[0]
++    cmd = ["ffmpeg", "-y"]
++    for p in parts:
++        cmd += ["-i", str(p)]
++    norm = "".join(
++        f"[{i}:a]aresample=44100,aformat=channel_layouts=mono[a{i}];" for i in range(len(parts))
++    )
++    joined = "".join(f"[a{i}]" for i in range(len(parts)))
++    cmd += ["-filter_complex", f"{norm}{joined}concat=n={len(parts)}:v=0:a=1[out]",
++            "-map", "[out]", str(dest)]
++    res = subprocess.run(cmd, capture_output=True)
++    if res.returncode != 0:
++        raise RuntimeError(f"audio concat failed: {res.stderr.decode()[-400:]}")
++    return dest
++
++
++def build_subtitle_lines(
++    narration: str, start: float, duration: float, words_per_card: int = 7
++) -> list[tuple[str, float, float]]:
++    """Timed subtitle cards for one section, offset to its place in the full audio.
++
++    Cards are sized by character count (same approach as the studio pipeline's
++    _build_subtitle_lines) so short and long cards don't drift from the voice.
++    """
++    words = narration.split()
++    if not words or duration <= 0:
++        return []
++    cards = [" ".join(words[i:i + words_per_card]) for i in range(0, len(words), words_per_card)]
++    weights = [max(1, len(c)) for c in cards]
++    total = sum(weights)
++    out, cursor = [], start
++    for text, w in zip(cards, weights):
++        d = duration * w / total
++        out.append((text, round(cursor, 3), round(cursor + d, 3)))
++        cursor += d
++    return out
++
++
++def scene_clip_durations(section_seconds: list[float], section_weights: list[list[float]]) -> list[float]:
++    """Per-scene clip lengths to hand to render_video, flattened across sections.
++
++    render_video overlaps consecutive clips by TRANSITION_SECONDS (xfade). Adding
++    that overlap to every clip but the last makes each scene *start* exactly where
++    its narration share starts and the video end exactly at the audio end.
++    """
++    shares = [d for secs, ws in zip(section_seconds, section_weights) for d in split_durations(secs, ws)]
++    return [round(s + (TRANSITION_SECONDS if i < len(shares) - 1 else 0.0), 3) for i, s in enumerate(shares)]
++
++
++# ── Orchestration ────────────────────────────────────────────────────────────
++
++def _slug(text: str) -> str:
++    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:30] or "plan"
++
++
++async def run_plan(plan: ProductionPlan, out_path: Path, plan_dir: Path | None = None) -> PlanRunResult:
++    from services.audio import generate_audio, get_audio_duration
++    from services.renderer import dimensions_for_aspect_ratio, render_video
++
++    plan_dir = plan_dir or Path.cwd()
++    run_id = f"plan_{_slug(plan.title)}_{uuid.uuid4().hex[:6]}"
++    work_dir = OUTPUT_DIR / run_id
++    work_dir.mkdir(parents=True, exist_ok=True)
++    width, height = dimensions_for_aspect_ratio(plan.aspect_ratio)
++    warnings: list[str] = []
++
++    # 1. Assets (per scene, in order)
++    logger.info("[plan] resolving %d scenes", plan.scene_count)
++    resolved: list[ResolvedScene] = []
++    used_urls: set[str] = set()
++    for section in plan.sections:
++        for scene in section.scenes:
++            rs = await resolve_scene(
++                scene, section_title=section.title, index=len(resolved), work_dir=work_dir,
++                plan_dir=plan_dir, width=width, height=height, used_urls=used_urls,
++            )
++            if rs.warning:
++                warnings.append(rs.warning)
++            resolved.append(rs)
++
++    music_path = None
++    if plan.music:
++        try:
++            from services.ai.media.asset import MediaAsset
++            from services.ai.media.asset_types import AssetKind
++
++            m = plan.music
++            if not m.startswith(("http://", "https://", "file://")):
++                p = Path(m).expanduser()
++                m = str(p if p.is_absolute() else (plan_dir / p).resolve())
++            music_path = await _download(
++                MediaAsset(url=m, kind=AssetKind.LOCAL, provider="music", provider_id=m)
++            )
++        except Exception as exc:  # noqa: BLE001
++            warnings.append(f"music skipped: {exc}")
++
++    # 2. Narration, one TTS call per section so each section's real duration is known
++    section_audio: list[Path] = []
++    section_secs: list[float] = []
++    for i, section in enumerate(plan.sections):
++        logger.info("[plan] TTS section %d/%d: %s", i + 1, len(plan.sections), section.title)
++        path = await generate_audio(section.narration, job_id=f"{run_id}_s{i:02d}", voice_id=plan.voice)
++        section_audio.append(path)
++        section_secs.append(get_audio_duration(path))
++    audio_path = _concat_audio(section_audio, work_dir / "narration.wav")
++    total = sum(section_secs)
++
++    # 3. Timeline + subtitles
++    durations = scene_clip_durations(section_secs, [[sc.duration_weight for sc in s.scenes] for s in plan.sections])
++    subtitle_lines: list[tuple[str, float, float]] = []
++    if plan.subtitles:
++        cursor = 0.0
++        for section, secs in zip(plan.sections, section_secs):
++            subtitle_lines += build_subtitle_lines(section.narration, cursor, secs)
++            cursor += secs
++
++    # 4. Render
++    video = await render_video(
++        audio_path=audio_path,
++        image_paths=[(r.path, d) for r, d in zip(resolved, durations)],
++        ai_clip_paths=[r.path if r.is_video else None for r in resolved],
++        script={"hook": plan.hook, "cta": plan.cta},
++        job_id=run_id,
++        actual_duration=total,
++        subtitle_lines=subtitle_lines,
++        bgm_path=music_path,
++        aspect_ratio=plan.aspect_ratio,
++    )
++    out_path.parent.mkdir(parents=True, exist_ok=True)
++    shutil.move(str(video), str(out_path))
++
++    # 5. Sidecar: YouTube metadata + per-scene credits (Wikimedia/Pexels attribution)
++    credits_path = out_path.with_suffix(".credits.json")
++    credits_path.write_text(json.dumps({
++        "title": plan.title,
++        "description": plan.description,
++        "tags": plan.tags,
++        "duration_seconds": round(total, 2),
++        "warnings": warnings,
++        "scenes": [
++            {"section": r.section, "kind": r.scene.kind.value, "source": r.source,
++             "caption": r.scene.caption, **r.credit}
++            for r in resolved
++        ],
++    }, indent=2), encoding="utf-8")
++    return PlanRunResult(out_path, total, warnings, credits_path)
+diff --git a/services/plan_mode/schema.py b/services/plan_mode/schema.py
+new file mode 100644
+index 0000000..a00f9dd
+--- /dev/null
++++ b/services/plan_mode/schema.py
+@@ -0,0 +1,170 @@
++"""Pydantic schema + pure helpers for a hand-written production plan.
++
++Deliberately dependency-light (pydantic only): validating a plan and printing a
++dry-run summary must work with no network, no ffmpeg, no API keys.
++"""
++
++from __future__ import annotations
++
++import json
++from enum import Enum
++from pathlib import Path
++from typing import Literal
++
++from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
++
++WORDS_PER_MINUTE = 150  # same pace generate_video.py assumes (2.5 words/sec)
++MIN_RECOMMENDED_SCENE_SECONDS = 2.0
++
++
++class VisualKind(str, Enum):
++    WIKIMEDIA = "wikimedia"          # Wikimedia Commons image search, no API key
++    PEXELS_IMAGE = "pexels_image"    # needs PEXELS_API_KEY
++    PEXELS_VIDEO = "pexels_video"    # needs PEXELS_API_KEY
++    URL = "url"                      # direct http(s) URL or local file (image or video)
++    TEXT_CARD = "text_card"          # generated title card, fully offline
++
++
++_QUERY_KINDS = {VisualKind.WIKIMEDIA, VisualKind.PEXELS_IMAGE, VisualKind.PEXELS_VIDEO}
++
++
++class _Strict(BaseModel):
++    # Reject unknown keys so typos ("scene" vs "scenes") fail loudly.
++    model_config = ConfigDict(extra="forbid")
++
++
++class Scene(_Strict):
++    kind: VisualKind
++    query: str | None = Field(None, description="Search text for wikimedia / pexels_* kinds")
++    url: str | None = Field(None, description="http(s) URL or local path for kind=url")
++    text: str | None = Field(None, description="Text shown for kind=text_card (also the fallback card text)")
++    caption: str | None = Field(None, description="Free-form note. Not rendered; kept in the credits sidecar")
++    duration_weight: float = Field(1.0, gt=0, le=100, description="Relative share of the section's narration time")
++
++    @field_validator("query", "url", "text", "caption")
++    @classmethod
++    def _blank_to_none(cls, v: str | None) -> str | None:
++        if v is None:
++            return None
++        v = v.strip()
++        return v or None
++
++    @model_validator(mode="after")
++    def _required_fields_for_kind(self) -> "Scene":
++        if self.kind in _QUERY_KINDS and not self.query:
++            raise ValueError(f"kind '{self.kind.value}' requires 'query'")
++        if self.kind is VisualKind.URL and not self.url:
++            raise ValueError("kind 'url' requires 'url'")
++        if self.kind is VisualKind.TEXT_CARD and not self.text:
++            raise ValueError("kind 'text_card' requires 'text'")
++        return self
++
++    @property
++    def fallback_text(self) -> str:
++        """Text for the text-card used when asset retrieval fails."""
++        return self.text or self.caption or self.query or ""
++
++
++class Section(_Strict):
++    title: str = Field(..., min_length=1)
++    narration: str = Field(..., description="Spoken text for this section")
++    scenes: list[Scene] = Field(..., min_length=1)
++
++    @field_validator("narration")
++    @classmethod
++    def _narration_not_blank(cls, v: str) -> str:
++        v = v.strip()
++        if not v:
++            raise ValueError("narration must not be empty")
++        return v
++
++    @property
++    def word_count(self) -> int:
++        return len(self.narration.split())
++
++
++class ProductionPlan(_Strict):
++    title: str = Field(..., min_length=1)
++    description: str = ""
++    tags: list[str] = Field(default_factory=list)
++    aspect_ratio: Literal["16:9", "9:16", "1:1"] = "16:9"
++    voice: str | None = Field(None, description="Kokoro voice id (e.g. 'am_adam') or a VOICE_REGISTRY key")
++    music: str | None = Field(None, description="Background music: local path or http(s) URL (mixed at -18 dB)")
++    hook: str = Field("", description="Optional text overlaid for the first 3 seconds")
++    cta: str = Field("", description="Optional text overlaid for the last 5 seconds")
++    subtitles: bool = True
++    sections: list[Section] = Field(..., min_length=1)
++
++    @property
++    def word_count(self) -> int:
++        return sum(s.word_count for s in self.sections)
++
++    @property
++    def scene_count(self) -> int:
++        return sum(len(s.scenes) for s in self.sections)
++
++    @property
++    def estimated_duration_seconds(self) -> float:
++        return estimate_duration(self.word_count)
++
++    @property
++    def narration(self) -> str:
++        return "\n\n".join(s.narration for s in self.sections)
++
++
++def estimate_duration(word_count: int, wpm: int = WORDS_PER_MINUTE) -> float:
++    return word_count / wpm * 60.0
++
++
++def split_durations(total: float, weights: list[float]) -> list[float]:
++    """Split ``total`` seconds across scenes proportionally to ``weights``.
++
++    The parts always sum to exactly ``total`` (the last part absorbs rounding).
++    """
++    if not weights:
++        return []
++    if any(w <= 0 for w in weights):
++        raise ValueError("weights must be positive")
++    weight_sum = sum(weights)
++    parts = [round(total * w / weight_sum, 3) for w in weights]
++    parts[-1] = round(total - sum(parts[:-1]), 3)
++    return parts
++
++
++def load_plan(path: str | Path) -> ProductionPlan:
++    """Read and validate a plan file. Raises pydantic.ValidationError / ValueError."""
++    raw = Path(path).read_text(encoding="utf-8")
++    try:
++        data = json.loads(raw)
++    except json.JSONDecodeError as exc:
++        raise ValueError(f"{path}: invalid JSON: {exc}") from exc
++    return ProductionPlan.model_validate(data)
++
++
++def format_summary(plan: ProductionPlan) -> str:
++    """Human-readable dry-run report (no network)."""
++    lines = [
++        f"Title:      {plan.title}",
++        f"Aspect:     {plan.aspect_ratio}",
++        f"Voice:      {plan.voice or '(default)'}",
++        f"Music:      {plan.music or '(none)'}",
++        f"Sections:   {len(plan.sections)}",
++        f"Scenes:     {plan.scene_count}",
++        f"Words:      {plan.word_count}",
++        f"Est. time:  {plan.estimated_duration_seconds:.0f}s at {WORDS_PER_MINUTE} wpm",
++        "",
++    ]
++    for i, sec in enumerate(plan.sections, 1):
++        sec_secs = estimate_duration(sec.word_count)
++        lines.append(f"[{i}] {sec.title}  ({sec.word_count} words, ~{sec_secs:.0f}s)")
++        parts = split_durations(sec_secs, [sc.duration_weight for sc in sec.scenes])
++        for j, (sc, secs) in enumerate(zip(sec.scenes, parts), 1):
++            detail = sc.query or sc.url or sc.text or ""
++            flag = "  <-- short" if secs < MIN_RECOMMENDED_SCENE_SECONDS else ""
++            lines.append(f"     {j}. {sc.kind.value:<13} ~{secs:4.1f}s  {detail[:60]}{flag}")
++    kinds = {sc.kind for s in plan.sections for sc in s.scenes}
++    env = []
++    if kinds & {VisualKind.PEXELS_IMAGE, VisualKind.PEXELS_VIDEO}:
++        env.append("PEXELS_API_KEY")
++    lines += ["", "Env needed: " + (", ".join(env) if env else "none")]
++    return "\n".join(lines)
+diff --git a/tests/test_plan_mode.py b/tests/test_plan_mode.py
+new file mode 100644
+index 0000000..d9fb10e
+--- /dev/null
++++ b/tests/test_plan_mode.py
+@@ -0,0 +1,372 @@
++"""Tests for plan-file mode. No network, no API keys, no real TTS.
++
++Run: python3 -m pytest -q tests/test_plan_mode.py
++"""
++
++from __future__ import annotations
++
++import asyncio
++import copy
++import json
++import shutil
++import sys
++import wave
++from pathlib import Path
++from unittest import mock
++
++import pytest
++from pydantic import ValidationError
++
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
++
++from services.plan_mode.schema import (  # noqa: E402
++    ProductionPlan,
++    VisualKind,
++    estimate_duration,
++    format_summary,
++    load_plan,
++    split_durations,
++)
++
++EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "production.example.json"
++
++
++def _plan_dict() -> dict:
++    return {
++        "title": "T",
++        "sections": [
++            {
++                "title": "S1",
++                "narration": "one two three four five six",
++                "scenes": [
++                    {"kind": "text_card", "text": "hello", "duration_weight": 1},
++                    {"kind": "wikimedia", "query": "cat", "duration_weight": 3},
++                ],
++            },
++            {
++                "title": "S2",
++                "narration": "seven eight nine ten",
++                "scenes": [{"kind": "pexels_video", "query": "sea"}],
++            },
++        ],
++    }
++
++
++@pytest.fixture(autouse=True)
++def _no_network():
++    """Fail any test that tries to open a socket."""
++    with mock.patch("socket.socket.connect", side_effect=AssertionError("network access in test")):
++        yield
++
++
++# ── Schema ───────────────────────────────────────────────────────────────────
++
++def test_example_plan_is_valid():
++    plan = load_plan(EXAMPLE)
++    assert 2 <= len(plan.sections) <= 3
++    assert 60 <= plan.estimated_duration_seconds <= 90
++    assert plan.aspect_ratio == "16:9"
++
++
++def test_defaults_and_counts():
++    plan = ProductionPlan.model_validate(_plan_dict())
++    assert plan.aspect_ratio == "16:9"
++    assert plan.voice is None and plan.music is None
++    assert plan.word_count == 10
++    assert plan.scene_count == 3
++    assert plan.estimated_duration_seconds == pytest.approx(estimate_duration(10))
++    assert plan.sections[0].scenes[0].kind is VisualKind.TEXT_CARD
++
++
++@pytest.mark.parametrize(
++    "mutate",
++    [
++        lambda d: d.pop("title"),
++        lambda d: d.update(sections=[]),
++        lambda d: d.update(aspect_ratio="4:3"),
++        lambda d: d.update(bogus_field=1),
++        lambda d: d["sections"][0].update(narration="   "),
++        lambda d: d["sections"][0].update(scenes=[]),
++        lambda d: d["sections"][0]["scenes"][0].update(kind="youtube"),
++        lambda d: d["sections"][0]["scenes"][1].pop("query"),        # wikimedia needs query
++        lambda d: d["sections"][1]["scenes"][0].update(query=" "),   # blank query
++        lambda d: d["sections"][0]["scenes"][0].pop("text"),         # text_card needs text
++        lambda d: d["sections"][0]["scenes"][0].update(kind="url", text=None),  # url needs url
++        lambda d: d["sections"][0]["scenes"][0].update(duration_weight=0),
++        lambda d: d["sections"][0]["scenes"][0].update(duration_weight=-1),
++    ],
++)
++def test_bad_plans_rejected(mutate):
++    data = copy.deepcopy(_plan_dict())
++    mutate(data)
++    with pytest.raises(ValidationError):
++        ProductionPlan.model_validate(data)
++
++
++def test_load_plan_invalid_json(tmp_path):
++    bad = tmp_path / "bad.json"
++    bad.write_text("{not json")
++    with pytest.raises(ValueError, match="invalid JSON"):
++        load_plan(bad)
++
++
++def test_summary_mentions_env_and_words():
++    plan = ProductionPlan.model_validate(_plan_dict())
++    text = format_summary(plan)
++    assert "Words:      10" in text
++    assert "PEXELS_API_KEY" in text
++    no_pexels = _plan_dict()
++    no_pexels["sections"][1]["scenes"][0] = {"kind": "text_card", "text": "x"}
++    assert "Env needed: none" in format_summary(ProductionPlan.model_validate(no_pexels))
++
++
++# ── Duration splitting ───────────────────────────────────────────────────────
++
++def test_split_durations_proportional_and_exact():
++    parts = split_durations(10.0, [1, 3])
++    assert parts == pytest.approx([2.5, 7.5])
++    assert sum(parts) == pytest.approx(10.0)
++
++
++def test_split_durations_sum_exact_with_awkward_weights():
++    parts = split_durations(7.0, [1, 1, 1])
++    assert sum(parts) == pytest.approx(7.0, abs=1e-9)
++    assert split_durations(5.0, [2]) == [5.0]
++    assert split_durations(5.0, []) == []
++
++
++def test_split_durations_rejects_nonpositive():
++    with pytest.raises(ValueError):
++        split_durations(5.0, [1, 0])
++
++
++def test_scene_clip_durations_account_for_xfade_overlap():
++    from services.plan_mode.runner import TRANSITION_SECONDS, scene_clip_durations
++
++    # two sections (6s: 1:2, 4s: single scene) -> shares 2, 4, 4
++    d = scene_clip_durations([6.0, 4.0], [[1, 2], [1]])
++    t = TRANSITION_SECONDS
++    assert d == pytest.approx([2 + t, 4 + t, 4])
++    # post-xfade timeline length equals the narration length
++    assert sum(d) - (len(d) - 1) * t == pytest.approx(10.0)
++
++
++def test_subtitle_lines_cover_section_window():
++    from services.plan_mode.runner import build_subtitle_lines
++
++    lines = build_subtitle_lines(" ".join(["w"] * 20), start=5.0, duration=10.0)
++    assert lines[0][1] == pytest.approx(5.0)
++    assert lines[-1][2] == pytest.approx(15.0)
++    assert build_subtitle_lines("", 0, 5) == []
++
++
++# ── Runner (everything external mocked) ──────────────────────────────────────
++
++def _silent_wav(path: Path, seconds: float) -> Path:
++    with wave.open(str(path), "wb") as w:
++        w.setnchannels(1)
++        w.setsampwidth(2)
++        w.setframerate(22050)
++        w.writeframes(b"\x00\x00" * int(22050 * seconds))
++    return path
++
++
++@pytest.fixture
++def isolated_outputs(tmp_path, monkeypatch):
++    import services.plan_mode.runner as runner
++
++    monkeypatch.setattr(runner, "OUTPUT_DIR", tmp_path / "out")
++    return tmp_path
++
++
++def _llm_tripwires():
++    """Patch every public entry into the LLM layer so any call fails the test."""
++    boom = mock.Mock(side_effect=AssertionError("LLM layer was called in plan mode"))
++    import services.ai.client as client
++    import services.ai.providers as providers
++
++    return [
++        mock.patch.object(client, "generate_json", boom),
++        mock.patch.object(client, "generate_text", boom),
++        mock.patch.object(client, "generate_text_with_metadata", boom),
++        mock.patch.object(client, "_call_provider", boom),
++        mock.patch.object(client, "_run_with_failover", boom),
++        mock.patch.object(providers, "get_enabled_providers", boom),
++        mock.patch.object(client, "get_enabled_providers", boom),
++    ], boom
++
++
++def test_run_plan_never_calls_llm_and_wires_stages(isolated_outputs, monkeypatch):
++    import services.audio as audio
++    import services.plan_mode.runner as runner
++    import services.renderer as renderer
++
++    for key in ("GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "CEREBRAS_API_KEY", "PEXELS_API_KEY"):
++        monkeypatch.delenv(key, raising=False)
++
++    plan = ProductionPlan.model_validate(_plan_dict())
++    out = isolated_outputs / "final.mp4"
++    tts_calls: list[tuple[str, str | None]] = []
++    render_kwargs: dict = {}
++
++    async def fake_tts(narration, job_id, voice_id=None, preferred_provider=None):
++        tts_calls.append((narration, voice_id))
++        return _silent_wav(isolated_outputs / f"{job_id}.wav", 6.0 if len(tts_calls) == 1 else 4.0)
++
++    async def fake_render(**kwargs):
++        render_kwargs.update(kwargs)
++        p = isolated_outputs / "rendered.mp4"
++        p.write_bytes(b"mp4")
++        return p
++
++    # wikimedia returns nothing / pexels has no key -> scenes degrade to text cards
++    async def no_results(self, intent, limit=5):
++        return []
++
++    from services.ai.media.providers.wikimedia import WikimediaProvider
++    monkeypatch.setattr(WikimediaProvider, "search", no_results)
++    tripwires, boom = _llm_tripwires()
++    for p in tripwires:
++        p.start()
++    try:
++        with mock.patch.object(audio, "generate_audio", fake_tts), \
++             mock.patch.object(renderer, "render_video", fake_render), \
++             mock.patch.object(runner, "_concat_audio", lambda parts, dest: parts[0]):
++            result = asyncio.run(runner.run_plan(plan, out, plan_dir=isolated_outputs))
++    finally:
++        for p in tripwires:
++            p.stop()
++
++    boom.assert_not_called()
++    assert out.read_bytes() == b"mp4"
++    # one TTS call per section, narration verbatim, voice passed through
++    assert [t[0] for t in tts_calls] == [s.narration for s in plan.sections]
++    # 3 scenes -> 3 timeline entries; 2 fell back (wikimedia + pexels w/o key)
++    assert len(render_kwargs["image_paths"]) == 3
++    assert len(result.warnings) == 2
++    assert all(Path(p).exists() for p, _ in render_kwargs["image_paths"])
++    assert render_kwargs["aspect_ratio"] == "16:9"
++    assert render_kwargs["actual_duration"] == pytest.approx(10.0)
++    # xfade-compensated clip lengths: shares 1.5, 4.5, 4 (+0.4 on all but the last)
++    assert [d for _, d in render_kwargs["image_paths"]] == pytest.approx([1.9, 4.9, 4.0])
++    sidecar = json.loads(result.credits_path.read_text())
++    assert sidecar["title"] == "T" and len(sidecar["scenes"]) == 3
++
++
++def test_resolve_scene_uses_provider_and_downloader_when_available(isolated_outputs):
++    import services.plan_mode.runner as runner
++    from services.ai.media.asset import MediaAsset
++    from services.ai.media.asset_types import AssetKind
++    from services.ai.media.providers.wikimedia import WikimediaProvider
++    from PIL import Image
++
++    img = isolated_outputs / "dl.jpg"
++    Image.new("RGB", (64, 64), "red").save(img)
++
++    async def fake_search(self, intent, limit=5):
++        assert intent.concise_search_query == "red cat"  # query passed through verbatim
++        return [
++            MediaAsset(url="http://x/small.jpg", kind=AssetKind.STOCK_IMAGE, provider="wikimedia",
++                       provider_id="a", width=400, height=300),
++            MediaAsset(url="http://x/big.jpg", kind=AssetKind.STOCK_IMAGE, provider="wikimedia",
++                       provider_id="b", width=3000, height=2000, author="Someone"),
++        ]
++
++    async def fake_download(asset):
++        fake_download.url = asset.url
++        return img
++
++    from services.plan_mode.schema import Scene
++
++    work = isolated_outputs / "w"
++    work.mkdir()
++    used: set[str] = set()
++    with mock.patch.object(WikimediaProvider, "search", fake_search), \
++         mock.patch.object(runner, "_download", fake_download):
++        rs = asyncio.run(runner.resolve_scene(
++            Scene(kind="wikimedia", query="red cat"), section_title="S", index=0,
++            work_dir=work, plan_dir=isolated_outputs, width=320, height=180, used_urls=used))
++    assert rs.source == "wikimedia" and rs.warning is None and not rs.is_video
++    assert fake_download.url == "http://x/big.jpg"  # prefers the large image
++    assert used == {"http://x/big.jpg"}
++    assert rs.credit["author"] == "Someone"
++
++
++def test_url_scene_local_file_and_video_detection(isolated_outputs):
++    import services.plan_mode.runner as runner
++    from services.plan_mode.schema import Scene
++    from PIL import Image
++
++    img = isolated_outputs / "pic.png"
++    Image.new("RGB", (800, 600), "blue").save(img)
++    vid = isolated_outputs / "clip.mp4"
++    vid.write_bytes(b"0" * 5000)
++    work = isolated_outputs / "w"
++    work.mkdir()
++    kw = dict(section_title="S", index=0, work_dir=work, plan_dir=isolated_outputs,
++              width=320, height=180, used_urls=set())
++
++    rs = asyncio.run(runner.resolve_scene(Scene(kind="url", url="pic.png"), **kw))  # relative to plan dir
++    assert rs.path == img and not rs.is_video and rs.warning is None
++    rs = asyncio.run(runner.resolve_scene(Scene(kind="url", url=str(vid)), **kw))
++    assert rs.path == vid and rs.is_video
++    rs = asyncio.run(runner.resolve_scene(Scene(kind="url", url="missing.png", text="fallback words"), **kw))
++    assert rs.source == "fallback" and rs.warning and rs.path.exists()
++
++
++# ── CLI ──────────────────────────────────────────────────────────────────────
++
++def test_cli_dry_run_makes_no_heavy_imports_or_network(capsys):
++    import generate_from_plan
++
++    with mock.patch("socket.socket", side_effect=AssertionError("network used in dry run")):
++        rc = generate_from_plan.main([str(EXAMPLE), "--dry-run"])
++    out = capsys.readouterr().out
++    assert rc == 0
++    assert "Est. time" in out and "Dry run OK" in out
++
++
++def test_cli_dry_run_rejects_bad_plan(tmp_path, capsys):
++    import generate_from_plan
++
++    bad = tmp_path / "bad.json"
++    bad.write_text(json.dumps({"title": "x", "sections": [{"title": "a", "narration": "b", "scenes": []}]}))
++    assert generate_from_plan.main([str(bad), "--dry-run"]) == 2
++    assert "Invalid plan" in capsys.readouterr().err
++
++
++# ── Real ffmpeg smoke test (offline: text cards + synthetic narration) ───────
++
++@pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg not installed")
++def test_end_to_end_offline_render_with_fake_tts(isolated_outputs):
++    import services.audio as audio
++    import services.plan_mode.runner as runner
++
++    plan = ProductionPlan.model_validate({
++        "title": "Smoke", "aspect_ratio": "1:1", "hook": "Hello",
++        "sections": [
++            {"title": "A", "narration": "alpha beta gamma delta",
++             "scenes": [{"kind": "text_card", "text": "One"}, {"kind": "text_card", "text": "Two"}]},
++            {"title": "B", "narration": "epsilon zeta",
++             "scenes": [{"kind": "text_card", "text": "Three"}]},
++        ],
++    })
++    lengths = iter([3.0, 2.5])
++
++    async def fake_tts(narration, job_id, voice_id=None, preferred_provider=None):
++        return _silent_wav(isolated_outputs / f"{job_id}.wav", next(lengths))
++
++    out = isolated_outputs / "smoke.mp4"
++    # point the real renderer's output dir at tmp too
++    import services.renderer as renderer
++    with mock.patch.object(audio, "generate_audio", fake_tts), \
++         mock.patch.object(renderer, "OUTPUT_DIR", isolated_outputs / "out"):
++        (isolated_outputs / "out").mkdir(exist_ok=True)
++        result = asyncio.run(runner.run_plan(plan, out, plan_dir=isolated_outputs))
++    assert out.exists() and out.stat().st_size > 1000
++    import subprocess
++    dur = float(subprocess.run(
++        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)],
++        capture_output=True, text=True).stdout)
++    assert dur == pytest.approx(5.5, abs=0.6)
++    assert result.credits_path.exists()

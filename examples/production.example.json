@@ -1,0 +1,39 @@
+{
+  "title": "How Lighthouses Guide Ships Home",
+  "description": "A short look at how lighthouses work, from ancient fire towers to the lens that changed everything.",
+  "tags": ["lighthouse", "history", "engineering", "documentary"],
+  "aspect_ratio": "16:9",
+  "voice": "am_adam",
+  "hook": "How do you guide a ship through the dark?",
+  "cta": "Subscribe for more short documentaries.",
+  "subtitles": true,
+  "sections": [
+    {
+      "title": "The Problem",
+      "narration": "For as long as people have sailed, the coast has been the most dangerous part of the journey. Rocks hide just below the surface, storms strip away every landmark, and at night a sailor can see almost nothing. Long before modern navigation, the answer was simple and bold: build something tall, and light a fire at the top of it.",
+      "scenes": [
+        { "kind": "text_card", "text": "How do you guide a ship through the dark?", "duration_weight": 1 },
+        { "kind": "wikimedia", "query": "rocky coast storm waves", "caption": "Dangerous coastline", "duration_weight": 2 },
+        { "kind": "pexels_video", "query": "ocean waves at night", "duration_weight": 2 }
+      ]
+    },
+    {
+      "title": "The First Towers",
+      "narration": "One of the most famous early examples stood at Alexandria, in Egypt, on the island of Pharos. Built in the third century before the common era, it was among the tallest structures of its time, and its name became the word for lighthouse in several languages. For centuries, these towers burned wood, coal, and later oil, but the light they gave off was weak and scattered in every direction.",
+      "scenes": [
+        { "kind": "wikimedia", "query": "Pharos of Alexandria lighthouse illustration", "duration_weight": 2 },
+        { "kind": "wikimedia", "query": "old lighthouse tower coast", "duration_weight": 1 },
+        { "kind": "pexels_image", "query": "lighthouse at dusk", "duration_weight": 1 }
+      ]
+    },
+    {
+      "title": "A Better Lens",
+      "narration": "Everything changed in the early eighteen hundreds, when the French physicist Augustin-Jean Fresnel designed a new kind of lens. Instead of one thick block of glass, it used rings of carefully shaped prisms that bent the light into a single powerful beam. Far less light was wasted, and that beam could be seen from many miles away. Today, satellites do most of the guiding, but the lighthouse still stands as proof that a good idea, well built, can keep shining for centuries.",
+      "scenes": [
+        { "kind": "wikimedia", "query": "Fresnel lens lighthouse", "duration_weight": 2 },
+        { "kind": "pexels_video", "query": "lighthouse beam night sky", "duration_weight": 2 },
+        { "kind": "text_card", "text": "A good idea, well built, can shine for centuries.", "duration_weight": 1 }
+      ]
+    }
+  ]
+}
