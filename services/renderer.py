@@ -243,10 +243,19 @@ def _find_font(size: int) -> ImageFont.FreeTypeFont:
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
         "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
     ]:
         if Path(path).exists():
             return ImageFont.truetype(path, size)
-    return ImageFont.load_default()
+    try:
+        # Pillow >= 10.1 ships a scalable built-in font. The old bare
+        # load_default() is a fixed 10px bitmap font that ignores `size`, which
+        # made subtitles and text cards tiny on machines without system fonts.
+        return ImageFont.load_default(size)
+    except TypeError:
+        return ImageFont.load_default()
 
 
 # ─── Text overlay (PIL) ───────────────────────────────────────────────────────
